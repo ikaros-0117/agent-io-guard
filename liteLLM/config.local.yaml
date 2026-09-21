@@ -1,0 +1,46 @@
+model_list:
+  - model_name: deepseek-flash
+    litellm_params:
+      model: deepseek/deepseek-flash
+      api_base: https://api.deepseek.com
+      api_key: os.environ/DEEPSEEK_API_KEY
+      timeout: 300
+
+  - model_name: deepseek-v4-pro
+    litellm_params:
+      model: deepseek/deepseek-v4-pro
+      api_base: https://api.deepseek.com
+      api_key: os.environ/DEEPSEEK_API_KEY
+      timeout: 300
+
+  # Add more models by copying this block and changing model_name/litellm_params:
+  # - model_name: local-qwen
+  #   litellm_params:
+  #     model: openai/Qwen/Qwen3-8B
+  #     api_key: os.environ/LOCAL_MODEL_API_KEY
+  #     api_base: http://127.0.0.1:8000/v1
+  #     timeout: 120
+
+litellm_settings:
+  # LiteLLM automatically drops provider-unsupported parameters when enabled.
+  drop_params: true
+
+guardrails:
+  # Invoked before the upstream model and again after the model response.
+  # LiteLLM appends /beta/litellm_basic_guardrail_api to this api_base.
+  - guardrail_name: agent-guard
+    litellm_params:
+      guardrail: generic_guardrail_api
+      mode: [pre_call]
+      api_base: os.environ/AGENT_GUARD_BASE_URL
+      # Sent by LiteLLM as the x-api-key header.
+      api_key: os.environ/AGENT_GUARD_TOKEN
+      default_on: true
+      fail_on_error: true
+      unreachable_fallback: fail_closed
+
+
+# general_settings:
+#   # Clients use this value as their Bearer token.
+#   # For production, put LiteLLM virtual keys/teams in a database instead.
+#   master_key: os.environ/LITELLM_MASTER_KEY
