@@ -3,8 +3,8 @@
 | 项目 | 内容 |
 | --- | --- |
 | 状态 | Draft |
-| 版本 | v0.1 |
-| 日期 | 2026-09-21 |
+| 版本 | v0.2 |
+| 日期 | 2026-09-26 |
 | 范围 | 架构与设计，不包含代码实现 |
 | 网关 | LiteLLM Proxy |
 | 安全服务 | agent-guard |
@@ -30,7 +30,7 @@
 1. **L1 静态规则和 L3 Qwen3Guard 是检测层。**
 2. **L2 缓存层是判决复用和性能优化层，不是独立安全检测层。**
 3. **缓存命中不能绕过 L1 硬拦截和策略优先级。**
-4. **输出拦截不能只依赖完整响应结束后的 `post_call`，流式场景需要单独方案。**
+4. **输出拦截不能只依赖完整响应结束后的 `post_call`，流式场景需要单独方案。**（实测：默认 `block_only` 下流式脱敏不生效，需 `incremental_diff`，见第 9 章）
 5. **只检查文本消息不够，工具调用、工具结果和结构化参数也必须纳入控制面。**
 6. **安全决策必须同步执行；审计、指标和异步分析可以旁路执行。**
 7. **Qwen3Guard 是安全分类器，不应被视为通用 Agent 或自由推理模型。**
@@ -423,7 +423,11 @@ Qwen3Guard 的分数只作为风险信号，不应直接等同于最终业务动
 
 如果 LiteLLM 只能在完整响应结束后执行 `post_call`，那么流式响应可能在检测前已经将内容发送给客户端。被拦截时，不安全前缀可能已经泄漏。
 
+实测确认了这一点：默认的 `block_only` 下 guard 即使返回改写后的 `texts`，客户端仍收到明文，等于“只拦不改”。
+
 ### 9.2 可选策略
+
+下表是通用取舍清单；v0.2 实测已把主场景（OpenAI 家族）的可选集合收窄为 `incremental_diff`，见 9.3。
 
 | 策略 | 优点 | 缺点 | 适用场景 |
 | --- | --- | --- | --- |
@@ -434,11 +438,22 @@ Qwen3Guard 的分数只作为风险信号，不应直接等同于最终业务动
 
 ### 9.3 首期建议
 
-首期优先选择：
+实测结论（LiteLLM 1.102.0 + agent-guard，证据与脚本见 `tools/`）：
 
-- 默认业务路由：非流式，或完整生成后检测。
-- 只有低风险路由才允许直接透传流式内容。
+- 默认 `block_only` 下**脱敏不会到达客户端**：流式场景的改写必须显式配置才生效。
+- `streaming_transform_mode: incremental_diff` 可由配置开启（`generic_guardrail_api` 会透传 `streaming_*`），这是当前唯一能让流式脱敏真正生效的杠杆。
+- `streaming_buffer_until_moderated` 属 Bedrock 专用，`generic_guardrail_api` 未透出，**无法通过配置开启**。
+- 累积文本撞上 `AGENT_GUARD_MAX_TEXT_CHARS`（默认 5 万）时 agent-guard 返回 413，LiteLLM 断流，而明文此时已全部流出——既无保护又断流。
+
+首期建议：
+
+- 主场景（OpenAI 家族）统一开启 `incremental_diff`，并由 guard 返回 `stream_holdback_chars` 覆盖跨 delta 边界。
+- 与流式体积治理同步落地：提高上限、按增量扫描、禁止 413 冒泡到 LiteLLM。
+- 非 OpenAI 路由只承诺 `block_only`（拦不改）；Anthropic 若启用需另行评审。
 - 在文档和客户端协议中明确：超时、拒绝、截断和审核状态的处理方式。
+- 上述能力落地前，对外承诺必须写成“输入侧已防护；流式输出侧仅拦截、不脱敏”。
+
+详细设计与排期见 [`protocol-adapter-design.md`](protocol-adapter-design.md) 第 9 章与第 12 章（协议适配优先级 P1）。
 
 ## 10. 工具调用、结构化数据和多模态
 
@@ -651,7 +666,9 @@ Client
 
 ## 19. 分阶段实施建议
 
-### P0：最小可用安全链路
+> 本节用 M0–M2 描述**里程碑范围**；当前场景下的执行优先级（P0–P4、R1）见 [`protocol-adapter-design.md`](protocol-adapter-design.md) 第 12 章。
+
+### M0：最小可用安全链路
 
 - 文本和非流式请求。
 - LiteLLM 输入 `pre_call` 和输出 `post_call`。
@@ -662,7 +679,7 @@ Client
 - shadow 模式观察误报和漏报。
 - 完整 `request_id`、`trace_id`、版本和层命中记录。
 
-### P1：增强控制能力
+### M1：增强控制能力
 
 - 输出脱敏和替换。
 - 流式按块/按句缓冲检测。
@@ -671,7 +688,7 @@ Client
 - 多轮上下文摘要。
 - 租户级策略和人工审核队列。
 
-### P2：生产强化
+### M2：生产强化
 
 - Qwen3Guard-Stream 或更细粒度流式检测。
 - 多模态预处理。
@@ -683,9 +700,9 @@ Client
 在开始编码前需要确认：
 
 1. 目标 LiteLLM 版本及其 guardrail 接口能力。
-2. 是否必须支持流式输出的实时拦截。
+2. 是否必须支持流式输出的实时拦截。（部分结论：主场景为 OpenAI 流式输出，方案见 `protocol-adapter-design.md` 第 9 章）
 3. 是否只需要 allow/block，还是需要脱敏和响应替换。
-4. 是否需要检查 `tool_calls` 和工具返回内容。
+4. 是否需要检查 `tool_calls` 和工具返回内容。（部分结论：需要，见 `protocol-adapter-design.md` 第 7.5、12 章）
 5. Qwen3Guard 的模型规模、量化方式和 GPU 资源。
 6. 可接受的输入和输出 P95 额外延迟。
 7. 哪些路由允许 fail-open，哪些必须 fail-closed。

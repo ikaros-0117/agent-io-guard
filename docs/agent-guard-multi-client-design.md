@@ -3,13 +3,14 @@
 | 项目 | 内容 |
 | --- | --- |
 | 状态 | Proposed |
-| 版本 | v0.1 |
-| 日期 | 2026-09-22 |
+| 版本 | v0.2 |
+| 日期 | 2026-09-26 |
 | 范围 | 方案设计，不包含代码实现 |
 | 核心组件 | agent-guard |
 | 固定上游 | LiteLLM Proxy `generic_guardrail_api` |
 | 关键约束 | 无法修改 LiteLLM Proxy，无法修改 Agent 客户端 |
 | 目标 | 在仅修改 agent-guard 的前提下，支持不同客户端的消息结构和安全语义 |
+| 执行优先级 | 见 [`protocol-adapter-design.md`](protocol-adapter-design.md) 第 12 章（P0–P4、R1） |
 
 ## 1. 执行摘要
 
@@ -1078,7 +1079,9 @@ layer_trace
 
 ## 17. 分阶段实施建议
 
-本节只定义路线，不在本设计文档阶段实现。
+本节只定义**组件路线**，不在本设计文档阶段实现。
+
+> v0.2 说明：执行顺序由 [`protocol-adapter-design.md`](protocol-adapter-design.md) 第 12 章统一排序（P0–P4、R1），本文 D 系列只描述“先建哪些组件”。对应关系：D0/D1 → A0；D2 → A2；D3 → A1（OpenAI 家族）与 R1（Anthropic 预留）；D4 → A3；D5 → S1–S3；D6 不在协议适配范围内。
 
 ### 阶段 D0：协议和夹具
 
@@ -1103,12 +1106,13 @@ layer_trace
 - 用真实 DSH 会话做回归。
 - 默认先 shadow，再 enforce。
 
-### 阶段 D3：OpenAI/Anthropic 兼容
+### 阶段 D3：OpenAI 家族兼容（Anthropic 预留）
 
 - 增加 OpenAI Chat Profile。
-- 增加 Responses/Anthropic Profile。
+- 增加 Responses Profile（Codex 类客户端，P0）。
 - 支持 role、content block 和 tool result 的不同形态。
 - 建立 Profile contract tests。
+- Anthropic Profile 预设接口但不实现（R1），仅在确有客户端使用时启用；Gemini 不接入。
 
 ### 阶段 D4：路由级扫描策略
 
@@ -1119,6 +1123,7 @@ layer_trace
 ### 阶段 D5：输出和工具边界
 
 - 在现有 LiteLLM 已提供输出 hook 的前提下接入输出检测。
+- OpenAI 流式输出优先（P1）：`incremental_diff` + guard 返回 `stream_holdback_chars`。
 - 工具参数和工具结果独立建模。
 - 明确工具执行前检查是否具备可行性。
 
@@ -1161,7 +1166,7 @@ layer_trace
 ## 20. 决策与待确认事项
 
 1. 当前 LiteLLM 实例实际提供哪些调用阶段：`pre_call`、`post_call`、`during_call` 还是仅已知部分？
-2. 除 DSH 外，下一批需要支持哪些 Agent 客户端？
+2. 除 DSH 外，下一批需要支持哪些 Agent 客户端？（已明确：主场景为 OpenAI 家族——DSH 类走 Chat Completions，Codex 类走 Responses；Anthropic 预留、Gemini 不接入）
 3. 每个客户端的 `request_headers` 是否能提供稳定客户端标识？
 4. 哪些路由允许 latest-only，哪些必须 full-history？
 5. 哪些路由允许历史内容 neutralize，哪些必须 fail closed？

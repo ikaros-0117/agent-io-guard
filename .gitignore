@@ -8,6 +8,11 @@ Icon?
 .Spotlight-V100
 .Trashes
 
+# Python
+__pycache__/
+*.py[cod]
+.pytest_cache/
+
 # Editor and tooling
 .idea/
 .vscode/
