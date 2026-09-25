@@ -30,6 +30,8 @@ liteLLM/.venv/bin/python tools/verify_input_guard_inprocess.py
 | system 消息含注入 | `GUARDRAIL_INTERVENED` | 静默替换，不阻断 |
 | 单条输入 > 50000 字符 | `413` | LiteLLM 抛错，请求失败（fail_closed） |
 
+> 注：`system` 一行记录的是**当前实测行为**。决策 1 已把目标行为定为“`system` / `developer` 受信、不扫描、返回 `NONE`”（见 `docs/protocol-adapter-design.md` 决策 1 与 13 章矩阵），A0 落地后该行需同步改为 `NONE`。
+
 它证明不了"上游没被调用"——那需要第 2 层。
 
 ## 第 2 层：端到端（真实代理 + mock 上游）
@@ -83,5 +85,5 @@ Anthropic 列仅作预留登记，Gemini 不在矩阵内。设计见 `docs/proto
 - **只在 Proxy 路径生效**：`litellm.callbacks` 里的 CustomGuardrail 在 SDK 直调路径（`litellm.acompletion`）不会被触发，实测 0 次调用。绕过网关直连模型 = 无保护。
 - **超长输入被硬拒**：单条 > `AGENT_GUARD_MAX_TEXT_CHARS` 时 agent-guard 返回 413，LiteLLM 因 `fail_on_error` + `unreachable_fallback: fail_closed` 直接让请求失败。想放行长文本必须调大上限或改降级策略。
 - **fail_closed 的代价是可用性**：agent-guard 挂掉时全部请求失败，实测返回 500（不是 400，因为没有策略判决）。
-- **system 消息注入不阻断**：被当作"历史"静默替换，属于当前设计选择。
+- **system 消息注入不阻断**：当前实现把它当作"历史"静默替换（`GUARDRAIL_INTERVENED`）。目标行为已定为信任策略：`system` / `developer` 受信、不扫描、返回 `NONE`；A0 落地后本行与上表的断言都要同步更新。
 - **脱敏会顺带做 NFKC 归一化**：`key：` 会变成 `key:`，见 `agent-guard/agent_guard/normalization.py` 的 `redaction_view`。

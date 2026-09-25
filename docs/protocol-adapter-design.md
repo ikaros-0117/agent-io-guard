@@ -3,7 +3,7 @@
 | 项目 | 内容 |
 | --- | --- |
 | 状态 | Proposed |
-| 版本 | v0.2 |
+| 版本 | v0.3 |
 | 日期 | 2026-09-26 |
 | 范围 | 协议适配规范与落地优先级，不包含代码实现 |
 | 固定上游 | LiteLLM Proxy `generic_guardrail_api` |
@@ -15,6 +15,8 @@
 - 被解决的问题：LiteLLM 只保证“传输层归一化”，不保证“语义归一化”。当前 L1 实现把两者混在一起，靠数组下标对齐，导致协议不同则行为不同。
 - 不在本文范围：L2/L3 检测器、多租户策略存储、规则内容本身。
 - 设计约束：**不修改 LiteLLM 代码**，改动集中在 guard 服务内。LiteLLM 的配置文件（`liteLLM/config.yaml`）属我方资产，可以调整；fork 或改动 LiteLLM 源码不在本方案内。
+
+v0.3 变更：记录决策 1（`system` / `developer` 信任策略）与决策 2（流式首字延迟按默认值），第 14 章拆为“已定决策 / 开放问题 / 验收标准”，第 13 章矩阵同步更新 system 一行。
 
 v0.2 变更：新增第 0 节“两层协议边界”；第 1.1 节与第 12 章按当前使用场景重排优先级；Anthropic 降为预留、Gemini 移出验收矩阵。
 
@@ -268,6 +270,8 @@ flowchart TD
 | DSH 折叠的 runtime-context `role=user` | user | application | context | context |
 
 关键点：**`role=user` 不再等价于“人说的”**。Anthropic 的 `tool_result` 在原生协议里也是 `role=user`，Gemini 的 `functionResponse` 也是；DSH 会把 runtime context 折进 `role=user`。`origin` 与 `authority` 必须由适配器显式赋值。
+
+**决策 1（2026-09-26）：`system` / `developer` 走信任策略。** 客户端自己注入的 system prompt 视为受信内容，**当前不处理**：不扫描、不改写、不参与判决，`mutable=false`、`scan=skip`。仍然为它建 item，是为了让对齐校验和审计能看到它（F1 的根因就是它没被显式表示），而不是为了检测它。后续若要升级为“替换 + 放行”，只改策略位，不动适配结构。
 
 ### 7.3 内容块映射
 
@@ -538,10 +542,10 @@ def build_envelope(payload):
 1. `tools/protocol_matrix.py`：以 OpenAI Chat × OpenAI Responses 为矩阵，先固化**当前行为**作为基线（F1/F2/F6 会以“实际判决”的形式被记录，先红后绿）。
 2. A0：Envelope Builder + Alignment Validator；`alignment=degraded` 时关闭历史豁免（修 F1、F6 的降级路径）。
 3. A1：补扫 `structured_messages[].tool_calls`、`role=tool`、`function_call_output`（修 F2、F6 的漏检路径）。
-4. S1：`liteLLM/config.yaml` 开启 `streaming_transform_mode: incremental_diff`，guard 响应新增 `stream_holdback_chars`（密钥类建议 32～64）。
+4. S1：`liteLLM/config.yaml` 开启 `streaming_transform_mode: incremental_diff`，guard 响应新增 `stream_holdback_chars`（默认 64，见决策 2）。
 5. S2：流式体积治理，禁止 413 冒泡到 LiteLLM。
 
-开工前必须先拍板两项（见第 14 章开放问题 1 与 5）：`system` 内注入的默认动作（决定 A0 的期望判决）、`stream_holdback_chars` 的默认值（决定首字延迟预算）。
+开工前需要拍板的两项已经定下（见 14.1）：`system` / `developer` 走信任策略（决策 1，决定 A0 的期望判决）、流式首字延迟按默认值（决策 2，决定 S1 的默认配置）。
 
 ## 13. 回归夹具
 
@@ -550,7 +554,7 @@ def build_envelope(payload):
 | 场景 | OpenAI Chat | OpenAI Responses | Anthropic（预留） |
 | --- | --- | --- | --- |
 | 当前轮注入 | block | **block（A0 后）** | block |
-| system/developer 内注入 | 按策略替换或 block | 同左 | block |
+| system/developer 内注入 | **不扫描，返回 `NONE`（决策 1）** | 同左 | 同左 |
 | 历史注入 + 当前轮正常 | 替换历史 | 替换历史 | 替换历史 |
 | tool_result / function_call_output 注入 | 按策略 | **检出（A1 后）** | 按策略 |
 | tool 参数危险命令 | block | **block（A1 后）** | block |
@@ -561,20 +565,25 @@ def build_envelope(payload):
 
 > v0.2：矩阵只以 OpenAI 家族为验收对象；Anthropic 列仅作预留登记，Gemini 列已移出。P0（A0/A1）与 P1（S1/S2）相关行属于**最小夹具集**，必须先落地。
 
-## 14. 验收标准与开放问题
+## 14. 决策、开放问题与验收标准
 
-验收：
+### 14.1 已定决策
+
+| 编号 | 决策 | 日期 | 影响 |
+| --- | --- | --- | --- |
+| 决策 1 | `system` / `developer` 采用信任策略：视为受信内容，当前不扫描、不改写、不拦截；保留 item 仅用于对齐校验与审计。后续可能升级为“替换 + 放行” | 2026-09-26 | 决定 A0 的期望判决：该场景返回 `NONE`；升级只改策略位，不动适配结构 |
+| 决策 2 | 流式首字延迟按默认设置，暂不做延迟预算评估；`stream_holdback_chars` 取 guard 侧默认值（密钥类 64 字符） | 2026-09-26 | 决定 S1 的默认配置：默认 64，可用环境变量覆盖，后续按实测延迟调整 |
+
+### 14.2 开放问题（括号内为阻塞的阶段）
+
+1. 工具结果注入默认 `block` 还是 `quarantine`。（阻塞 A3）
+2. DSH 类折叠客户端的 `origin=application` 识别规则由谁维护、如何版本化。（阻塞 A2）
+3. Anthropic 是否纳入、何时启用（R1）；若不启用，该路由的承诺等级如何写。（R1 启用前）
+4. 图片/文档与多模态在本层的降级策略（记录、放行还是阻断）。（P0–P4 之外，暂不排期）
+
+### 14.3 验收标准
 
 - 同一语义请求在 OpenAI 家族两种方言（Chat Completions / Responses）下产生等价判决；Anthropic 预留，启用时纳入同一标准（允许方言导致的 `mutable` 差异，但必须显式记录原因）。
 - `alignment=degraded` 时不存在任何“静默放行”路径。
 - 改写后的文本除命中区间外与输入逐字节一致。
 - 所有判决可追溯到 `item_id` + `origin_ref` + `adapter_version`，且日志不含原文。
-
-开放问题（括号内为阻塞的阶段）：
-
-1. `system` 内注入的期望动作是 `block` 还是“替换 + 放行”（当前实测为后者）。（阻塞 A0 的策略默认值）
-2. 工具结果注入默认 `block` 还是 `quarantine`。（阻塞 A3）
-3. DSH 类折叠客户端的 `origin=application` 识别规则由谁维护、如何版本化。（阻塞 A2）
-4. Anthropic 是否纳入、何时启用（R1）；若不启用，该路由的承诺等级如何写。（R1 启用前）
-5. 高敏路由开启流式缓冲可接受的首字延迟预算（决定 `stream_holdback_chars` 默认值）。（阻塞 S1）
-6. 图片/文档与多模态在本层的降级策略（记录、放行还是阻断）。（P0–P4 之外，暂不排期）
