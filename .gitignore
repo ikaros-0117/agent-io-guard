@@ -1,0 +1,19 @@
+# macOS metadata
+.DS_Store
+.DS_Store?
+.AppleDouble
+.LSOverride
+Icon?
+._*
+.Spotlight-V100
+.Trashes
+
+# Editor and tooling
+.idea/
+.vscode/
+*.swp
+
+# Local environment files
+.env
+.env.*
+!.env.example
