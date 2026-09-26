@@ -2,7 +2,11 @@
   "schema_version": "chat-client-fixture/v1",
   "fixture_id": "dsh_chat.system_runtime_context",
   "client_id": "dsh_chat",
-  "profile_expected": "dsh_chat",
+  "profile_expected": "generic_chat",
+  "match_expectation": "capability_required",
+  "expected_capabilities": [
+    "folded_runtime_context"
+  ],
   "scenario": "system_runtime_context",
   "request": {
     "input_type": "request",

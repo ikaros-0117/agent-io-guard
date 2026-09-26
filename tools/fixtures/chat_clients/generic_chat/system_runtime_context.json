@@ -3,6 +3,8 @@
   "fixture_id": "generic_chat.system_runtime_context",
   "client_id": "generic_chat",
   "profile_expected": "generic_chat",
+  "match_expectation": "expected",
+  "expected_capabilities": [],
   "scenario": "system_runtime_context",
   "request": {
     "input_type": "request",

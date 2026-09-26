@@ -9,6 +9,8 @@
     "fixture_id",
     "client_id",
     "profile_expected",
+    "match_expectation",
+    "expected_capabilities",
     "scenario",
     "request",
     "expected_action",
@@ -36,6 +38,23 @@
         "generic_chat",
         "dsh_chat"
       ]
+    },
+    "match_expectation": {
+      "enum": [
+        "expected",
+        "fallback_required",
+        "capability_required",
+        "inherited_from_request"
+      ]
+    },
+    "expected_capabilities": {
+      "type": "array",
+      "uniqueItems": true,
+      "items": {
+        "enum": [
+          "folded_runtime_context"
+        ]
+      }
     },
     "scenario": {
       "enum": [
@@ -125,6 +144,94 @@
                 "const": "request"
               }
             }
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "match_expectation": {
+            "const": "fallback_required"
+          }
+        },
+        "required": [
+          "match_expectation"
+        ]
+      },
+      "then": {
+        "properties": {
+          "profile_expected": {
+            "const": "generic_chat"
+          },
+          "expected_capabilities": {
+            "maxItems": 0
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "match_expectation": {
+            "const": "capability_required"
+          }
+        },
+        "required": [
+          "match_expectation"
+        ]
+      },
+      "then": {
+        "properties": {
+          "profile_expected": {
+            "const": "generic_chat"
+          },
+          "expected_capabilities": {
+            "minItems": 1
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "match_expectation": {
+            "const": "inherited_from_request"
+          }
+        },
+        "required": [
+          "match_expectation"
+        ]
+      },
+      "then": {
+        "properties": {
+          "profile_expected": {
+            "const": "generic_chat"
+          },
+          "expected_capabilities": {
+            "maxItems": 0
+          },
+          "stream": {
+            "const": true
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "match_expectation": {
+            "const": "expected"
+          }
+        },
+        "required": [
+          "match_expectation"
+        ]
+      },
+      "then": {
+        "properties": {
+          "expected_capabilities": {
+            "maxItems": 0
           }
         }
       }

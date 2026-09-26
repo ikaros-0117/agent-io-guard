@@ -3,6 +3,8 @@
   "fixture_id": "generic_chat.historical_injection_current_normal",
   "client_id": "generic_chat",
   "profile_expected": "generic_chat",
+  "match_expectation": "expected",
+  "expected_capabilities": [],
   "scenario": "historical_injection_current_normal",
   "request": {
     "input_type": "request",

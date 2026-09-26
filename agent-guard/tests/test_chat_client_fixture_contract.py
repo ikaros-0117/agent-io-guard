@@ -12,9 +12,11 @@ if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
 from tools.fixtures.chat_clients.loader import (  # noqa: E402
+    CAPABILITY_IDS,
     CLIENT_IDS,
     EXPECTED_ACTIONS,
     FIXTURE_ROOT,
+    MATCH_EXPECTATIONS,
     PROFILE_IDS,
     SCENARIOS,
     REQUIRED_FIELDS,
@@ -52,6 +54,8 @@ def test_each_fixture_matches_shared_contract(path: Path) -> None:
     assert fixture.fixture_id == f"{fixture.client_id}.{fixture.scenario}"
     assert fixture.client_id in CLIENT_IDS
     assert fixture.profile_expected in PROFILE_IDS
+    assert fixture.match_expectation in MATCH_EXPECTATIONS
+    assert set(fixture.expected_capabilities) <= CAPABILITY_IDS
     assert fixture.expected_action in EXPECTED_ACTIONS
     assert fixture.notes
     assert fixture.sanitized is True
@@ -167,7 +171,9 @@ def test_dsh_runtime_context_fixture_uses_folded_role_user_shape() -> None:
     messages = fixture.request["structured_messages"]
     assert messages[-1]["role"] == "user"
     assert messages[-1]["content"].startswith("Current runtime context.")
-    assert fixture.profile_expected == "dsh_chat"
+    assert fixture.profile_expected == "generic_chat"
+    assert fixture.match_expectation == "capability_required"
+    assert fixture.expected_capabilities == ("folded_runtime_context",)
 
 
 def test_fixture_headers_are_sanitized() -> None:
@@ -185,6 +191,11 @@ def test_schema_json_matches_loader_contract() -> None:
     assert set(schema["required"]) == set(REQUIRED_FIELDS)
     assert set(schema["properties"]["client_id"]["enum"]) == CLIENT_IDS
     assert set(schema["properties"]["profile_expected"]["enum"]) == PROFILE_IDS
+    assert set(schema["properties"]["match_expectation"]["enum"]) == MATCH_EXPECTATIONS
+    assert (
+        set(schema["properties"]["expected_capabilities"]["items"]["enum"])
+        == CAPABILITY_IDS
+    )
     assert set(schema["properties"]["scenario"]["enum"]) == SCENARIOS
     assert set(schema["properties"]["expected_action"]["enum"]) == EXPECTED_ACTIONS
 
@@ -204,6 +215,7 @@ def test_loader_rejects_missing_required_field(field: str) -> None:
     [
         ("client_id", "unknown_chat"),
         ("profile_expected", "unknown_chat"),
+        ("match_expectation", "assume_client"),
         ("expected_action", "ALLOW"),
     ],
 )
@@ -222,4 +234,40 @@ def test_loader_rejects_non_sanitized_fixture() -> None:
     document["sanitized"] = False
 
     with pytest.raises(FixtureValidationError, match="sanitized"):
+        validate_fixture(document, path=path)
+
+
+def test_loader_rejects_fallback_that_claims_a_client_specific_profile() -> None:
+    path = FIXTURE_ROOT / "dsh_chat" / "normal.json"
+    document = copy.deepcopy(json.loads(path.read_text(encoding="utf-8")))
+    document["profile_expected"] = "dsh_chat"
+
+    with pytest.raises(FixtureValidationError, match="generic_chat"):
+        validate_fixture(document, path=path)
+
+
+def test_loader_rejects_capability_declaration_without_capability_expectation() -> None:
+    path = FIXTURE_ROOT / "dsh_chat" / "system_runtime_context.json"
+    document = copy.deepcopy(json.loads(path.read_text(encoding="utf-8")))
+    document["match_expectation"] = "fallback_required"
+
+    with pytest.raises(FixtureValidationError, match="expected_capabilities"):
+        validate_fixture(document, path=path)
+
+
+def test_loader_rejects_unknown_capability() -> None:
+    path = FIXTURE_ROOT / "dsh_chat" / "system_runtime_context.json"
+    document = copy.deepcopy(json.loads(path.read_text(encoding="utf-8")))
+    document["expected_capabilities"] = ["guessed_client_profile"]
+
+    with pytest.raises(FixtureValidationError, match="unsupported expected_capabilities"):
+        validate_fixture(document, path=path)
+
+
+def test_stream_fixture_must_inherit_profile_from_request() -> None:
+    path = FIXTURE_ROOT / "generic_chat" / "stream_secret.json"
+    document = copy.deepcopy(json.loads(path.read_text(encoding="utf-8")))
+    document["match_expectation"] = "expected"
+
+    with pytest.raises(FixtureValidationError, match="stream fixtures"):
         validate_fixture(document, path=path)

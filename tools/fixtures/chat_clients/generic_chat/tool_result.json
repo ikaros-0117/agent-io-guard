@@ -3,6 +3,8 @@
   "fixture_id": "generic_chat.tool_result",
   "client_id": "generic_chat",
   "profile_expected": "generic_chat",
+  "match_expectation": "expected",
+  "expected_capabilities": [],
   "scenario": "tool_result",
   "request": {
     "input_type": "request",

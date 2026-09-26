@@ -2,7 +2,9 @@
   "schema_version": "chat-client-fixture/v1",
   "fixture_id": "dsh_chat.historical_injection_current_normal",
   "client_id": "dsh_chat",
-  "profile_expected": "dsh_chat",
+  "profile_expected": "generic_chat",
+  "match_expectation": "fallback_required",
+  "expected_capabilities": [],
   "scenario": "historical_injection_current_normal",
   "request": {
     "input_type": "request",

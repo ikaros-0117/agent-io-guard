@@ -13,6 +13,15 @@ FIXTURE_ROOT = Path(__file__).resolve().parent
 CLIENT_IDS = frozenset({"generic_chat", "dsh_chat"})
 PROFILE_IDS = frozenset({"generic_chat", "dsh_chat"})
 EXPECTED_ACTIONS = frozenset({"NONE", "BLOCKED", "GUARDRAIL_INTERVENED"})
+MATCH_EXPECTATIONS = frozenset(
+    {
+        "expected",
+        "fallback_required",
+        "capability_required",
+        "inherited_from_request",
+    }
+)
+CAPABILITY_IDS = frozenset({"folded_runtime_context"})
 SCENARIOS = frozenset(
     {
         "normal",
@@ -30,6 +39,8 @@ REQUIRED_FIELDS = (
     "fixture_id",
     "client_id",
     "profile_expected",
+    "match_expectation",
+    "expected_capabilities",
     "scenario",
     "request",
     "expected_action",
@@ -51,6 +62,8 @@ class ChatClientFixture:
     fixture_id: str
     client_id: str
     profile_expected: str
+    match_expectation: str
+    expected_capabilities: tuple[str, ...]
     scenario: str
     request: dict[str, Any]
     expected_action: str
@@ -218,6 +231,25 @@ def validate_fixture(
     profile_expected = _require_string(path, fixture["profile_expected"], "profile_expected")
     if profile_expected not in PROFILE_IDS:
         _fail(path, f"unsupported profile_expected: {profile_expected}")
+    match_expectation = _require_string(path, fixture["match_expectation"], "match_expectation")
+    if match_expectation not in MATCH_EXPECTATIONS:
+        _fail(path, f"unsupported match_expectation: {match_expectation}")
+    expected_capabilities = tuple(
+        _require_string_list(
+            path,
+            fixture["expected_capabilities"],
+            "expected_capabilities",
+        )
+    )
+    unsupported_capabilities = set(expected_capabilities) - CAPABILITY_IDS
+    if unsupported_capabilities:
+        _fail(
+            path,
+            "unsupported expected_capabilities: "
+            + ", ".join(sorted(unsupported_capabilities)),
+        )
+    if len(expected_capabilities) != len(set(expected_capabilities)):
+        _fail(path, "expected_capabilities must not contain duplicates")
     scenario = _require_string(path, fixture["scenario"], "scenario")
     if scenario not in SCENARIOS:
         _fail(path, f"unsupported scenario: {scenario}")
@@ -244,6 +276,20 @@ def validate_fixture(
         _fail(path, "stream must be a boolean")
     _validate_request(path, request, stream=stream, scenario=scenario)
 
+    if match_expectation == "fallback_required" and profile_expected != "generic_chat":
+        _fail(path, "fallback_required fixtures must expect generic_chat")
+    if match_expectation == "capability_required":
+        if profile_expected != "generic_chat":
+            _fail(path, "capability_required fixtures must expect generic_chat")
+        if not expected_capabilities:
+            _fail(path, "capability_required fixtures must declare expected_capabilities")
+    elif expected_capabilities:
+        _fail(path, "expected_capabilities require match_expectation=capability_required")
+    if match_expectation == "inherited_from_request" and not stream:
+        _fail(path, "inherited_from_request is only valid for response fixtures")
+    if match_expectation != "inherited_from_request" and stream:
+        _fail(path, "stream fixtures must inherit profile from the request phase")
+
     expected_response_texts: tuple[str, ...] | None = None
     if "expected_response_texts" in fixture:
         expected_response_texts = tuple(
@@ -260,6 +306,8 @@ def validate_fixture(
         fixture_id=fixture_id,
         client_id=client_id,
         profile_expected=profile_expected,
+        match_expectation=match_expectation,
+        expected_capabilities=expected_capabilities,
         scenario=scenario,
         request=request,
         expected_action=expected_action,
