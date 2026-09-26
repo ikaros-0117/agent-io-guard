@@ -1,0 +1,49 @@
+{
+  "schema_version": "chat-client-fixture/v1",
+  "fixture_id": "generic_chat.system_runtime_context",
+  "client_id": "generic_chat",
+  "profile_expected": "generic_chat",
+  "scenario": "system_runtime_context",
+  "request": {
+    "input_type": "request",
+    "texts": [
+      "Follow the sanitized fixture policy.",
+      "Summarize the fixture status."
+    ],
+    "structured_messages": [
+      {
+        "role": "system",
+        "content": "Follow the sanitized fixture policy."
+      },
+      {
+        "role": "user",
+        "content": "Summarize the fixture status."
+      }
+    ],
+    "tool_calls": null,
+    "request_headers": {
+      "accept": "application/json",
+      "authorization": "[present]",
+      "content-type": "application/json",
+      "user-agent": "sanitized-chat-client/1.0",
+      "x-client-name": "[present]"
+    },
+    "model": "fixture-model",
+    "litellm_version": "1.102.0",
+    "additional_provider_specific_params": {}
+  },
+  "expected_action": "NONE",
+  "expected_upstream_messages": [
+    {
+      "role": "system",
+      "content": "Follow the sanitized fixture policy."
+    },
+    {
+      "role": "user",
+      "content": "Summarize the fixture status."
+    }
+  ],
+  "notes": "Standard Chat system context remains trusted and unmodified under the current policy.",
+  "sanitized": true,
+  "stream": false
+}

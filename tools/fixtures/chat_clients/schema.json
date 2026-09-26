@@ -1,0 +1,310 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "chat-client-fixture/v1",
+  "title": "Chat client fixture",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "fixture_id",
+    "client_id",
+    "profile_expected",
+    "scenario",
+    "request",
+    "expected_action",
+    "expected_upstream_messages",
+    "notes",
+    "sanitized",
+    "stream"
+  ],
+  "properties": {
+    "schema_version": {
+      "const": "chat-client-fixture/v1"
+    },
+    "fixture_id": {
+      "type": "string",
+      "pattern": "^[a-z][a-z0-9_]*\\.[a-z][a-z0-9_]*$"
+    },
+    "client_id": {
+      "enum": [
+        "generic_chat",
+        "dsh_chat"
+      ]
+    },
+    "profile_expected": {
+      "enum": [
+        "generic_chat",
+        "dsh_chat"
+      ]
+    },
+    "scenario": {
+      "enum": [
+        "normal",
+        "current_injection",
+        "historical_injection_current_normal",
+        "system_runtime_context",
+        "tool_call",
+        "tool_result",
+        "input_secret",
+        "stream_secret"
+      ]
+    },
+    "request": {
+      "$ref": "#/$defs/request"
+    },
+    "expected_action": {
+      "enum": [
+        "NONE",
+        "BLOCKED",
+        "GUARDRAIL_INTERVENED"
+      ]
+    },
+    "expected_upstream_messages": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/upstream_message"
+      }
+    },
+    "expected_response_texts": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "notes": {
+      "type": "string",
+      "minLength": 1
+    },
+    "sanitized": {
+      "const": true
+    },
+    "stream": {
+      "type": "boolean"
+    }
+  },
+  "allOf": [
+    {
+      "if": {
+        "properties": {
+          "scenario": {
+            "const": "stream_secret"
+          }
+        },
+        "required": [
+          "scenario"
+        ]
+      },
+      "then": {
+        "required": [
+          "expected_response_texts"
+        ],
+        "properties": {
+          "stream": {
+            "const": true
+          },
+          "expected_response_texts": {
+            "minItems": 1
+          },
+          "request": {
+            "properties": {
+              "input_type": {
+                "const": "response"
+              }
+            }
+          }
+        }
+      },
+      "else": {
+        "properties": {
+          "stream": {
+            "const": false
+          },
+          "request": {
+            "properties": {
+              "input_type": {
+                "const": "request"
+              }
+            }
+          }
+        }
+      }
+    }
+  ],
+  "$defs": {
+    "request": {
+      "type": "object",
+      "required": [
+        "input_type",
+        "texts",
+        "structured_messages",
+        "tool_calls",
+        "request_headers",
+        "model",
+        "litellm_version",
+        "additional_provider_specific_params"
+      ],
+      "properties": {
+        "input_type": {
+          "enum": [
+            "request",
+            "response"
+          ]
+        },
+        "texts": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "structured_messages": {
+          "oneOf": [
+            {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/message"
+              },
+              "minItems": 1
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "tool_calls": {
+          "oneOf": [
+            {
+              "type": "array",
+              "items": {
+                "type": "object"
+              }
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "request_headers": {
+          "oneOf": [
+            {
+              "type": "object",
+              "additionalProperties": {
+                "type": "string"
+              }
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "model": {
+          "type": "string",
+          "minLength": 1
+        },
+        "litellm_version": {
+          "type": "string",
+          "minLength": 1
+        },
+        "additional_provider_specific_params": {
+          "type": "object"
+        }
+      },
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "input_type": {
+                "const": "request"
+              }
+            },
+            "required": [
+              "input_type"
+            ]
+          },
+          "then": {
+            "properties": {
+              "structured_messages": {
+                "type": "array",
+                "minItems": 1
+              },
+              "request_headers": {
+                "type": "object"
+              }
+            }
+          },
+          "else": {
+            "properties": {
+              "structured_messages": {
+                "type": "null"
+              },
+              "tool_calls": {
+                "type": "null"
+              },
+              "request_headers": {
+                "type": "null"
+              }
+            }
+          }
+        }
+      ]
+    },
+    "message": {
+      "type": "object",
+      "required": [
+        "role"
+      ],
+      "properties": {
+        "role": {
+          "enum": [
+            "system",
+            "developer",
+            "user",
+            "assistant",
+            "tool"
+          ]
+        },
+        "content": {
+          "type": [
+            "string",
+            "array",
+            "object",
+            "null"
+          ]
+        },
+        "tool_calls": {
+          "type": "array",
+          "items": {
+            "type": "object"
+          }
+        },
+        "tool_call_id": {
+          "type": "string"
+        }
+      }
+    },
+    "upstream_message": {
+      "type": "object",
+      "required": [
+        "role",
+        "content"
+      ],
+      "properties": {
+        "role": {
+          "enum": [
+            "system",
+            "developer",
+            "user",
+            "assistant",
+            "tool"
+          ]
+        },
+        "content": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "additionalProperties": false
+    }
+  }
+}

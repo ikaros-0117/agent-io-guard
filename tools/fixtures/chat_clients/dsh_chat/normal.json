@@ -1,0 +1,49 @@
+{
+  "schema_version": "chat-client-fixture/v1",
+  "fixture_id": "dsh_chat.normal",
+  "client_id": "dsh_chat",
+  "profile_expected": "dsh_chat",
+  "scenario": "normal",
+  "request": {
+    "input_type": "request",
+    "texts": [
+      "Follow the sanitized fixture policy.",
+      "Summarize the fixture status."
+    ],
+    "structured_messages": [
+      {
+        "role": "system",
+        "content": "Follow the sanitized fixture policy."
+      },
+      {
+        "role": "user",
+        "content": "Summarize the fixture status."
+      }
+    ],
+    "tool_calls": null,
+    "request_headers": {
+      "accept": "application/json",
+      "authorization": "[present]",
+      "content-type": "application/json",
+      "user-agent": "sanitized-chat-client/1.0",
+      "x-client-name": "[present]"
+    },
+    "model": "fixture-model",
+    "litellm_version": "1.102.0",
+    "additional_provider_specific_params": {}
+  },
+  "expected_action": "NONE",
+  "expected_upstream_messages": [
+    {
+      "role": "system",
+      "content": "Follow the sanitized fixture policy."
+    },
+    {
+      "role": "user",
+      "content": "Summarize the fixture status."
+    }
+  ],
+  "notes": "Synthetic normal Chat payload; no client-specific semantics are asserted in M0.",
+  "sanitized": true,
+  "stream": false
+}

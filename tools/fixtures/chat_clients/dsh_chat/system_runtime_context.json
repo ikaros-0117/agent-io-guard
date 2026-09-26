@@ -1,0 +1,49 @@
+{
+  "schema_version": "chat-client-fixture/v1",
+  "fixture_id": "dsh_chat.system_runtime_context",
+  "client_id": "dsh_chat",
+  "profile_expected": "dsh_chat",
+  "scenario": "system_runtime_context",
+  "request": {
+    "input_type": "request",
+    "texts": [
+      "Summarize the fixture status.",
+      "Current runtime context. Sanitized runtime marker."
+    ],
+    "structured_messages": [
+      {
+        "role": "user",
+        "content": "Summarize the fixture status."
+      },
+      {
+        "role": "user",
+        "content": "Current runtime context. Sanitized runtime marker."
+      }
+    ],
+    "tool_calls": null,
+    "request_headers": {
+      "accept": "application/json",
+      "authorization": "[present]",
+      "content-type": "application/json",
+      "user-agent": "sanitized-chat-client/1.0",
+      "x-client-name": "[present]"
+    },
+    "model": "fixture-model",
+    "litellm_version": "1.102.0",
+    "additional_provider_specific_params": {}
+  },
+  "expected_action": "NONE",
+  "expected_upstream_messages": [
+    {
+      "role": "user",
+      "content": "Summarize the fixture status."
+    },
+    {
+      "role": "user",
+      "content": "Current runtime context. Sanitized runtime marker."
+    }
+  ],
+  "notes": "DSH-style runtime context is folded into role=user; M0 records the shape only.",
+  "sanitized": true,
+  "stream": false
+}

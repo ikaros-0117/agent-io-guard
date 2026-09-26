@@ -1,0 +1,58 @@
+{
+  "schema_version": "chat-client-fixture/v1",
+  "fixture_id": "dsh_chat.tool_call",
+  "client_id": "dsh_chat",
+  "profile_expected": "dsh_chat",
+  "scenario": "tool_call",
+  "request": {
+    "input_type": "request",
+    "texts": [
+      "Continue after the tool call."
+    ],
+    "structured_messages": [
+      {
+        "role": "assistant",
+        "content": null,
+        "tool_calls": [
+          {
+            "id": "call-fixture-tool-1",
+            "type": "function",
+            "function": {
+              "name": "shell",
+              "arguments": "{\"command\":\"rm -rf /\"}"
+            }
+          }
+        ]
+      },
+      {
+        "role": "user",
+        "content": "Continue after the tool call."
+      }
+    ],
+    "tool_calls": [
+      {
+        "id": "call-fixture-tool-1",
+        "type": "function",
+        "function": {
+          "name": "shell",
+          "arguments": "{\"command\":\"rm -rf /\"}"
+        }
+      }
+    ],
+    "request_headers": {
+      "accept": "application/json",
+      "authorization": "[present]",
+      "content-type": "application/json",
+      "user-agent": "sanitized-chat-client/1.0",
+      "x-client-name": "[present]"
+    },
+    "model": "fixture-model",
+    "litellm_version": "1.102.0",
+    "additional_provider_specific_params": {}
+  },
+  "expected_action": "BLOCKED",
+  "expected_upstream_messages": [],
+  "notes": "Synthetic destructive tool arguments are unrewritable and must block before execution.",
+  "sanitized": true,
+  "stream": false
+}

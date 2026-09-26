@@ -10,9 +10,9 @@
 | 安全服务 | agent-guard |
 | 语义检测模型 | Qwen3Guard（后续 L3） |
 
-> 当前 Chat 多客户端的代码实施以 [`chat-multi-client-adaptation-implementation.md`](chat-multi-client-adaptation-implementation.md) 为准；本文保留总体架构、L1/L2/L3、缓存、可观测性和生产化路线。
+> 当前 Chat 多客户端的代码实施以 [`chat-multi-client-adaptation-implementation.md`](chat-multi-client-adaptation-implementation.md) 为准；本文保留总体架构、L1/L2/L3、缓存、可观测性和生产化路线。多客户端兼容采用 Generic Chat + Capability Detection，不按客户端数量复制完整 Profile。
 
-> 当前实现记录（2026-09-26）：Chat-only 入口、LiteLLM generic guardrail、agent-guard L1 Envelope/对齐校验、Chat 流式 `incremental_diff`、安全边界下的增量扫描均已落地并通过本机 HTTP 验收。Responses、Anthropic、Gemini 不属于当前交付范围。下一阶段重点是 `/v1/chat/completions` 下的多客户端 Profile 适配，而不是新增协议。
+> 当前实现记录（2026-09-26）：Chat-only 入口、LiteLLM generic guardrail、agent-guard L1 Envelope/对齐校验、Chat 流式 `incremental_diff`、安全边界下的增量扫描均已落地并通过本机 HTTP 验收。Responses、Anthropic、Gemini 不属于当前交付范围。下一阶段重点是 `/v1/chat/completions` 下的 Capability 适配，而不是新增协议。
 
 ## 1. 文档目标
 
@@ -458,7 +458,7 @@ Qwen3Guard 的分数只作为风险信号，不应直接等同于最终业务动
 - `/v1/chat/completions` 已开启 `incremental_diff`，guard 返回 `stream_holdback_chars`，并在安全边界下复用流式前缀扫描结果。
 - 对 PEM、编码、Unicode、非追加式内容或缺少稳定调用 ID 的情况，回退全量扫描。
 - Chat-only 入口负责隔离 Responses 等未验收路由。
-- 下一阶段对 DSH、OpenCode、Claude Code 等 Chat 客户端分别做 Profile 和流式回归。
+- 下一阶段对 DSH、OpenCode、Claude Code 等实际 Chat 请求提取 Capability；只有出现新的消息语义时才增加最小 Adapter，并为能力组合做流式回归。
 - 在文档和客户端协议中明确：超时、拒绝、截断和审核状态的处理方式。
 
 详细设计与排期见 [`protocol-adapter-design.md`](protocol-adapter-design.md) 第 9 章与第 12 章（协议适配优先级 P1）。
@@ -565,7 +565,7 @@ Qwen3Guard 主要是文本安全模型。若后续需要图片、音频或视频
 
 ## 15. 性能与容量目标
 
-在下一阶段多客户端 Profile 和后续 L2/L3 实施前，需要确定以下预算：
+在下一阶段多客户端 Capability 和后续 L2/L3 实施前，需要确定以下预算：
 
 - LiteLLM 引入的额外 P95 延迟。
 - L1 的目标 P95 延迟。
@@ -674,7 +674,7 @@ Client
 
 ## 19. 分阶段实施建议
 
-> 本节用 M0–M2 描述里程碑范围；当前执行以 Chat-only 的 P0/P1 收尾和下一阶段多客户端 Chat Profile 适配为准。Responses/Anthropic/Gemini 不纳入当前客户端闭环。
+> 本节用 M0–M2 描述里程碑范围；当前执行以 Chat-only 的 P0/P1 收尾和下一阶段多客户端 Chat Capability 适配为准。Responses/Anthropic/Gemini 不纳入当前客户端闭环。
 
 ### M0：Chat-only L1 安全链路（已完成）
 
@@ -685,13 +685,14 @@ Client
 - `request_id`、`trace_id`、规则版本和层命中记录。
 - Redis、Qwen3Guard、shadow 误报观察和人工审核仍属于后续能力。
 
-### M1：Chat 多客户端闭环（下一阶段）
+### M1：Chat 多客户端能力闭环（下一阶段）
 
 - 冻结 DSH、OpenCode、Claude Code 等实际使用 Chat 的客户端夹具。
-- 建立 `generic_chat`、`dsh_chat`、`opencode_chat`、`claude_code_chat` 等 Profile。
-- 按请求结构/header 解析客户端来源、runtime context、RAG、工具调用和工具结果。
-- 为每个 Profile 建立对齐、当前轮、历史攻击、工具链、非流式脱敏和流式脱敏契约测试。
-- 识别不确定时 strict/fail-closed，不靠客户端名称或内容前缀猜测。
+- 完成 generic/dsh fixture 可识别性审计；无法区分的场景回退 Generic。
+- 建立 Capability Registry/Resolver，先实现 `folded_runtime_context`、`tool_chain` 等可复用能力。
+- 按请求结构/header/metadata 提取 runtime context、RAG、工具调用和工具结果能力。
+- 为能力组合建立对齐、当前轮、历史攻击、工具链、非流式脱敏和流式脱敏契约测试。
+- 识别不确定时 strict/fail-closed，不靠客户端名称或内容前缀猜测；只有新语义无法表达时才增加特殊 Adapter。
 
 ### M2：生产强化与后续协议
 
