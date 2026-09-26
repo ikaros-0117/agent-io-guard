@@ -20,6 +20,12 @@ from .capabilities.models import (
     Origin,
     Trust,
 )
+from .capabilities.tool_chain import (
+    TOOL_CHAIN_ID,
+    ToolChainAnalysis,
+    ToolChainCapability,
+    structured_tool_items,
+)
 from .detector import TextItem
 from .models import LiteLLMGuardrailRequest
 
@@ -39,50 +45,12 @@ def content_blocks(content: Any) -> list[str]:
                 result.append(block)
             elif isinstance(block, dict) and isinstance(block.get("text"), str):
                 result.append(block["text"])
-            elif isinstance(block, dict) and block.get("type") == "tool_result":
-                result.extend(content_blocks(block.get("content")))
         return result
     if isinstance(content, dict) and isinstance(content.get("text"), str):
         return [content["text"]]
     if isinstance(content, (int, float, bool)):
         return [str(content)]
     return []
-
-
-def structured_tool_items(message: dict[str, Any], ref: str, role: str) -> list[tuple[str, str, str]]:
-    """Return (origin_ref, content_type, text) for structured tool data."""
-    result: list[tuple[str, str, str]] = []
-    calls = list(message.get("tool_calls") or [])
-    if isinstance(message.get("function_call"), dict):
-        calls.append({"function": message["function_call"]})
-    content = message.get("content")
-    if isinstance(content, list):
-        for block_index, block in enumerate(content):
-            if not isinstance(block, dict):
-                continue
-            block_type = block.get("type")
-            if block_type in {"tool_use", "function_call"}:
-                calls.append(block)
-            elif block_type in {"tool_result", "function_call_output"}:
-                value = block.get("content", block.get("output"))
-                values = content_blocks(value)
-                for value_index, text in enumerate(values):
-                    result.append((f"{ref}.content[{block_index}].content[{value_index}]", "tool_result", text))
-    if message.get("type") == "function_call_output":
-        for value_index, text in enumerate(content_blocks(message.get("output"))):
-            result.append((f"{ref}.output[{value_index}]", "tool_result", text))
-    if message.get("type") == "function_call":
-        calls.append(message)
-    for call_index, call in enumerate(calls):
-        if not isinstance(call, dict):
-            continue
-        function = call.get("function") or call
-        arguments = function.get("arguments", function.get("input")) if isinstance(function, dict) else None
-        if arguments is None:
-            continue
-        value = arguments if isinstance(arguments, str) else json.dumps(arguments, ensure_ascii=False, sort_keys=True)
-        result.append((f"{ref}.tool_calls[{call_index}].function.arguments", "tool_call", value))
-    return result
 
 
 @dataclass(frozen=True, slots=True)
@@ -178,6 +146,48 @@ def _security_fields(
     return "unknown", "unknown", "unknown", scope, mutable, "low", ()
 
 
+def _apply_tool_chain(
+    items: list[SecurityItem],
+    analysis: ToolChainAnalysis,
+    capabilities: CapabilitySet,
+) -> tuple[list[SecurityItem], tuple[str, ...]]:
+    tool_chain_enabled = capabilities.has(TOOL_CHAIN_ID)
+    unpaired_result_refs = set(analysis.unpaired_result_refs)
+    resolved: list[SecurityItem] = []
+    for item in items:
+        record = analysis.record_for_ref(item.origin_ref)
+        if record is None:
+            resolved.append(item)
+            continue
+
+        capability_ids = item.capability_ids
+        if tool_chain_enabled:
+            capability_ids = tuple(
+                dict.fromkeys((*capability_ids, TOOL_CHAIN_ID))
+            )
+
+        if item.origin_ref in unpaired_result_refs:
+            resolved.append(
+                replace(
+                    item,
+                    origin="unknown",
+                    authority="unknown",
+                    trust="unknown",
+                    confidence="low",
+                    capability_ids=capability_ids,
+                )
+            )
+            continue
+        resolved.append(replace(item, capability_ids=capability_ids))
+
+    reasons: list[str] = []
+    if analysis.conflicting_call_ids:
+        reasons.append("tool_chain_conflicting_call")
+    if analysis.unpaired_result_refs:
+        reasons.append("tool_chain_unpaired_result")
+    return resolved, tuple(reasons)
+
+
 @dataclass(frozen=True, slots=True)
 class SecurityEnvelope:
     items: tuple[SecurityItem, ...]
@@ -217,6 +227,7 @@ class ChatEnvelopeBuilder:
         flat = list(payload.texts or [])
         messages = payload.structured_messages or []
         tool_calls = payload.tool_calls or []
+        tool_chain_analysis = ToolChainCapability().analyze(payload)
         items: list[SecurityItem] = []
         reasons: list[str] = []
         cursor = 0
@@ -327,19 +338,30 @@ class ChatEnvelopeBuilder:
                 if isinstance(arguments, str)
                 else json.dumps(arguments, ensure_ascii=False, sort_keys=True)
             )
+            origin_ref = f"tool_calls[{index}].function.arguments"
             # Top-level calls are an alternate projection of structured calls.
-            if any(
-                item.content_type == "tool_call" and item.text == value
-                for item in items
+            record = tool_chain_analysis.record_for_ref(origin_ref)
+            if (
+                record is not None
+                and record.call_id is not None
+                and origin_ref in tool_chain_analysis.duplicate_call_refs
+                and record.call_id not in tool_chain_analysis.conflicting_call_ids
             ):
                 continue
             add(
-                f"tool_calls[{index}].function.arguments",
+                origin_ref,
                 "assistant",
                 "current_turn",
                 "tool_call",
                 value,
             )
+
+        items, tool_chain_reasons = _apply_tool_chain(
+            items,
+            tool_chain_analysis,
+            capabilities,
+        )
+        reasons.extend(tool_chain_reasons)
 
         if any(item.origin == "unknown" and item.authority == "context" for item in items):
             reasons.append("unknown_runtime_context_marker")
@@ -348,6 +370,16 @@ class ChatEnvelopeBuilder:
             FOLDED_RUNTIME_CONTEXT_ID in item.capability_ids for item in items
         )
         if declared_folded and not applied_folded:
+            reasons.append("capability_not_applied")
+        declared_tool_chain = capabilities.has(TOOL_CHAIN_ID)
+        applied_tool_chain = any(
+            TOOL_CHAIN_ID in item.capability_ids for item in items
+        )
+        if (
+            declared_tool_chain
+            and tool_chain_analysis.has_tool_semantics
+            and not applied_tool_chain
+        ):
             reasons.append("capability_not_applied")
 
         # Only confirmed human text may define the current-turn boundary. Known

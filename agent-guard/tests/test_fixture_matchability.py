@@ -58,8 +58,6 @@ FALLBACK_REQUIRED_SCENARIOS = frozenset(
         "normal",
         "current_injection",
         "historical_injection_current_normal",
-        "tool_call",
-        "tool_result",
         "input_secret",
     }
 )
@@ -161,6 +159,19 @@ def test_system_runtime_context_declares_only_the_folded_context_capability(
     assert dsh.expected_capabilities == ("folded_runtime_context",)
 
 
+@pytest.mark.parametrize("scenario", ["tool_call", "tool_result"])
+def test_tool_fixtures_declare_the_generic_tool_chain_capability(
+    fixtures: tuple[ChatClientFixture, ...],
+    scenario: str,
+) -> None:
+    clients = _by_client(fixtures, scenario)
+
+    for fixture in clients.values():
+        assert fixture.profile_expected == "generic_chat"
+        assert fixture.match_expectation == "capability_required"
+        assert fixture.expected_capabilities == ("tool_chain",)
+
+
 def test_only_the_audited_fixture_declares_a_capability(
     fixtures: tuple[ChatClientFixture, ...],
 ) -> None:
@@ -170,8 +181,14 @@ def test_only_the_audited_fixture_declares_a_capability(
         if fixture.expected_capabilities
     }
 
-    assert set(declared) == {("dsh_chat", "system_runtime_context")}
-    assert set(declared[("dsh_chat", "system_runtime_context")]) <= CAPABILITY_IDS
+    assert set(declared) == {
+        ("dsh_chat", "system_runtime_context"),
+        ("generic_chat", "tool_call"),
+        ("dsh_chat", "tool_call"),
+        ("generic_chat", "tool_result"),
+        ("dsh_chat", "tool_result"),
+    }
+    assert all(set(capabilities) <= CAPABILITY_IDS for capabilities in declared.values())
 
 
 def test_stream_fixtures_inherit_profile_from_the_request_phase(

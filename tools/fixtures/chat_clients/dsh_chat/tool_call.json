@@ -3,8 +3,10 @@
   "fixture_id": "dsh_chat.tool_call",
   "client_id": "dsh_chat",
   "profile_expected": "generic_chat",
-  "match_expectation": "fallback_required",
-  "expected_capabilities": [],
+  "match_expectation": "capability_required",
+  "expected_capabilities": [
+    "tool_chain"
+  ],
   "scenario": "tool_call",
   "request": {
     "input_type": "request",
@@ -54,7 +56,7 @@
   },
   "expected_action": "BLOCKED",
   "expected_upstream_messages": [],
-  "notes": "Synthetic destructive tool arguments are unrewritable and must block before execution.",
+  "notes": "Synthetic Chat tool call exercises generic tool_chain semantics; tool arguments are non-mutable.",
   "sanitized": true,
   "stream": false
 }

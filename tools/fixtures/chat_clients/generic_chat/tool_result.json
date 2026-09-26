@@ -3,8 +3,10 @@
   "fixture_id": "generic_chat.tool_result",
   "client_id": "generic_chat",
   "profile_expected": "generic_chat",
-  "match_expectation": "expected",
-  "expected_capabilities": [],
+  "match_expectation": "capability_required",
+  "expected_capabilities": [
+    "tool_chain"
+  ],
   "scenario": "tool_result",
   "request": {
     "input_type": "request",
@@ -60,7 +62,7 @@
   },
   "expected_action": "BLOCKED",
   "expected_upstream_messages": [],
-  "notes": "Synthetic indirect injection in role=tool must block; the tool chain id is retained.",
+  "notes": "Synthetic Chat tool chain exercises tool_call_id pairing and untrusted tool-result scanning.",
   "sanitized": true,
   "stream": false
 }

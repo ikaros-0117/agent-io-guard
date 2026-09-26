@@ -18,6 +18,13 @@ from .models import (
     Trust,
     TurnBoundary,
 )
+from .tool_chain import (
+    TOOL_CHAIN_ID,
+    TOOL_CHAIN_VERSION,
+    ToolChainAnalysis,
+    ToolChainCapability,
+    ToolChainRecord,
+)
 
 __all__ = [
     "Authority",
@@ -33,6 +40,11 @@ __all__ = [
     "Origin",
     "RuntimeContextClassification",
     "Trust",
+    "TOOL_CHAIN_ID",
+    "TOOL_CHAIN_VERSION",
+    "ToolChainAnalysis",
+    "ToolChainCapability",
+    "ToolChainRecord",
     "TurnBoundary",
     "classify_user_text",
     "is_known_runtime_context_text",

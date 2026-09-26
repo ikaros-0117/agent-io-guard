@@ -176,6 +176,16 @@ def test_dsh_runtime_context_fixture_uses_folded_role_user_shape() -> None:
     assert fixture.expected_capabilities == ("folded_runtime_context",)
 
 
+@pytest.mark.parametrize("scenario", ["tool_call", "tool_result"])
+def test_tool_fixtures_expect_generic_tool_chain(scenario: str) -> None:
+    for client_id in CLIENT_IDS:
+        fixture = load_fixture(FIXTURE_ROOT / client_id / f"{scenario}.json")
+
+        assert fixture.profile_expected == "generic_chat"
+        assert fixture.match_expectation == "capability_required"
+        assert fixture.expected_capabilities == ("tool_chain",)
+
+
 def test_fixture_headers_are_sanitized() -> None:
     for fixture in load_fixtures():
         headers = fixture.request["request_headers"]

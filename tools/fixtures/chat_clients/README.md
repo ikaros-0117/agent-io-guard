@@ -1,8 +1,8 @@
 # Chat client fixtures
 
-本目录是 `/v1/chat/completions` 多客户端适配的 M0/M0.1 基线。它只冻结
-LiteLLM generic guardrail 入参形状、可识别性审计结果和通用期望，不实现
-Profile Resolver、不改写文本，也不改变现有 strict/fail-closed 策略。
+本目录是 `/v1/chat/completions` 多客户端适配的 M0/M0.1/M5 夹具基线。它冻结
+LiteLLM generic guardrail 入参形状、可识别性审计结果和 Capability 期望，不代替
+Profile Resolver 或规则实现。
 
 ## 范围
 
@@ -28,7 +28,7 @@ Profile Resolver、不改写文本，也不改变现有 strict/fail-closed 策�
 | `client_id` | fixture 的来源观察标签，当前允许 `generic_chat`、`dsh_chat`。 |
 | `profile_expected` | Resolver 应稳定得到的能力组合/回退 Profile；当前所有预期均为 `generic_chat`。 |
 | `match_expectation` | `expected`、`fallback_required`、`capability_required` 或 `inherited_from_request`。 |
-| `expected_capabilities` | 该 fixture 允许声明的语义能力；M0.1 只允许 `folded_runtime_context`。 |
+| `expected_capabilities` | 该 fixture 允许声明的语义能力：`folded_runtime_context` 或 `tool_chain`。 |
 | `scenario` | 八个固定场景之一。 |
 | `request` | guardrail 入参投影。 |
 | `expected_action` | `NONE`、`BLOCKED` 或 `GUARDRAIL_INTERVENED`。 |
@@ -61,15 +61,17 @@ Profile Resolver、不改写文本，也不改变现有 strict/fail-closed 策�
 | `current_injection` | 无 | `profile_expected=generic_chat`、`fallback_required` |
 | `historical_injection_current_normal` | 无 | `profile_expected=generic_chat`、`fallback_required` |
 | `system_runtime_context` | `texts`、`structured_messages`；role 序列 `system,user` → `user,user` | `profile_expected=generic_chat`、`capability_required`、`folded_runtime_context` |
-| `tool_call` | 无 | `profile_expected=generic_chat`、`fallback_required` |
-| `tool_result` | 无 | `profile_expected=generic_chat`、`fallback_required` |
+| `tool_call` | 无；双方都有通用 `tool_calls` 结构 | `profile_expected=generic_chat`、`capability_required`、`tool_chain` |
+| `tool_result` | 无；双方都有通用 `tool_call_id` 配对 | `profile_expected=generic_chat`、`capability_required`、`tool_chain` |
 | `input_secret` | 无 | `profile_expected=generic_chat`、`fallback_required` |
 | `stream_secret` | 无；输出阶段不重新识别客户端 | `profile_expected=generic_chat`、`inherited_from_request` |
 
 审计结论：
 
-- `system_runtime_context` 是唯一存在真实请求结构差异的场景，但该差异只支持
+- `system_runtime_context` 是唯一存在客户端间真实请求结构差异的场景，但该差异只支持
   `folded_runtime_context` Capability，不支持客户端身份识别。
+- `tool_call` 与 `tool_result` 的结构在双方一致，因此复用通用 `tool_chain`，
+  不创建客户端专属副本。
 - 其余输入场景没有可靠识别信号，未增加伪造 header，也未强制标记为 `dsh_chat`。
 - `stream_secret` 没有新建客户端识别逻辑，明确标记为继承输入阶段 Profile。
 - `client_id` 只作为 fixture 的观察来源，不能作为 trust 或安全放行依据。
@@ -89,12 +91,18 @@ agent-guard/.venv/bin/python -m pytest \
   agent-guard/tests/test_fixture_matchability.py -q
 ```
 
-## M0.1 边界
+## M5 Capability 决策
+
+- 实现 `tool_chain`：现有 fixture 已提供 assistant/top-level `tool_calls`、
+  `role=tool` 和 `tool_call_id` 的真实结构证据。
+- 不实现 `partial_history`：没有夹具或 metadata 证明客户端不发送完整历史。
+- 不实现 `rag_context`：没有结构、metadata 或可信接入约定可证明 RAG 来源。
+- 不为不可能区分的客户端创建空 Profile；无可靠差异时继续复用 Generic Chat。
+
+## 当前边界
 
 这些夹具只定义“后续 Profile/Envelope 实现需要满足的契约”。本轮没有实现：
 
-- Capability Resolver、Capability 领域模型或 `folded_runtime_context` 逻辑；
-- DSH runtime context 的 Envelope 语义、last non-synthetic user 或历史豁免决策；
 - fixture 回放、真实上游矩阵和 SSE 客户端断言；
 - `/v1/responses` 或其他协议。
 

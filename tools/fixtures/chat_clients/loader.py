@@ -21,7 +21,7 @@ MATCH_EXPECTATIONS = frozenset(
         "inherited_from_request",
     }
 )
-CAPABILITY_IDS = frozenset({"folded_runtime_context"})
+CAPABILITY_IDS = frozenset({"folded_runtime_context", "tool_chain"})
 SCENARIOS = frozenset(
     {
         "normal",
