@@ -32,17 +32,30 @@ Client -> Chat-only ingress -> LiteLLM Proxy -> agent-guard -> Memory/Redis/Qwen
 | --- | --- |
 | P0 | `/v1/chat/completions` 输入侧判定正确性（对齐校验 + 结构化字段补扫） |
 | P1 | `/v1/chat/completions` 流式输出的脱敏生效与体积治理 |
-| P2–P4 | 客户端识别（DSH）、工具链与改写质量、残余风险文档化 |
+| P2 | `/v1/chat/completions` 多客户端 Profile 适配与验收（DSH、OpenCode、Claude Code 等实际走 Chat 的客户端） |
+| P3–P4 | 工具链策略、span 精确回写、残余风险文档化 |
 | 后续 | `/v1/responses` 适配与验收；Anthropic 按需启用 |
 
-**本期 Chat 路由的 P0 + P1 已完成约定的功能验收。** Chat-only 入口、输入侧拦截和流式脱敏/长流增量扫描通过真实本机 HTTP 链路验证。Responses 不计入本期验收，也不能因现有代码部分支持而宣称已受保护。
+**本期 Chat 路由的 P0 + P1 已完成约定的功能验收。** Chat-only 入口、输入侧拦截、流式脱敏和长流增量扫描通过真实本机 HTTP 链路验证。下一阶段不是再换协议，而是让多个客户端在同一个 `/v1/chat/completions` 接口下都能被正确解释和保护。Responses 不计入本期验收，也不能因现有代码部分支持而宣称已受保护。
 
 ### 实施进度（2026-09-26）
 
-- P0：已增加内部来源映射、对齐校验与严格降级拦截；Chat/Responses 进程内协议矩阵 10 项通过，结构化工具参数与工具结果可在 guard **被调用时**检出。
+- P0：已增加内部来源映射、对齐校验与严格降级拦截；Chat 交付矩阵 5 项通过，Responses 的 5 项仅作为诊断基线，结构化工具参数与工具结果可在 guard **被调用时**检出。
 - P1：主配置已开启 Chat `incremental_diff`（每轮扫描），guard 返回默认 64 字符 holdback；拆分密钥、拆分 PEM 和 10 万字符长流中密钥均通过真实 HTTP Proxy SSE 端到端验证。输出累积扫描上限独立配置，超限返回策略拦截而非 413。
 - 路由隔离：新增精确路径白名单入口（Chat + 模型列表），LiteLLM 后端仅监听回环地址；真实进程测试证明 Responses/未知路由被拒、Chat/SSE 正常。增量扫描按调用 ID 缓存累计文本，在可证明安全的逗号边界只扫新增部分；对 PEM、编码、Unicode、缺失调用 ID 等不确定情况自动回退全量扫描，并保留原输出上限。
-- **仍需注意**：该隔离依赖只对外暴露入口端口，不能直接暴露私有 LiteLLM 端口。Responses 纯工具项绕过问题作为后续适配缺口保留。详见 [网关说明](liteLLM/README.md) 和 [工具验证说明](tools/README.md)。
+- **仍需注意**：该隔离依赖只对外暴露入口端口，不能直接暴露私有 LiteLLM 端口。Responses 纯工具项绕过问题作为后续适配缺口保留。当前 Chat 多客户端 Profile 还没有全部落地，下一阶段要补齐客户端夹具、Profile Resolver、来源/轮次判断和逐客户端回归。详见 [多客户端设计](docs/agent-guard-multi-client-design.md)、[网关说明](liteLLM/README.md) 和 [工具验证说明](tools/README.md)。
+
+## 下一步：完成 Chat Completions 多客户端闭环
+
+本阶段的目标不是支持新的协议，而是让不同客户端在都调用 `/v1/chat/completions` 时，agent-guard 能正确区分：真人输入、历史消息、客户端 runtime context、RAG 内容、工具调用和工具结果。
+
+计划顺序：
+
+1. 收集并冻结 DSH、OpenCode、Claude Code 等实际 Chat 请求夹具；如果 Codex 等客户端被配置为走 Chat，也纳入同一矩阵。
+2. 在 agent-guard 内建立 Profile Registry/Resolver，按请求结构和可用 header 识别客户端；识别不确定时走 Generic/strict，不靠客户端名称猜测。
+3. 将每个 Profile 映射到统一 Envelope，验证 `texts` 与 `structured_messages` 对齐、当前轮边界和 synthetic context。
+4. 对每个客户端分别验收输入拦截、历史攻击处理、工具参数/工具结果、密钥脱敏和流式输出。
+5. 只有所有目标 Chat 客户端通过矩阵，才宣称“`/v1/chat/completions` 多客户端闭环”；Responses 仍保持关闭。
 
 ## 文档
 

@@ -6,6 +6,8 @@
 
 本期安全验收仅针对客户端 `/v1/chat/completions`。`/v1/responses` 尚未完成适配验收；即使 guard 能处理其中部分字段，也不能承诺该路由已受保护。请用 `liteLLM/serve_chat_only.py` 启动项目提供的精确路由白名单入口，不要直接对外暴露 LiteLLM 本体；仅 `config.yaml` 不提供路由隔离。
 
+P0/P1 已解决“Chat 请求能不能被安全检查”的基础问题；下一阶段要解决“不同 Chat 客户端发来的内容如何正确解释”的问题。当前代码已有通用 Chat Envelope 和少量 synthetic context 兼容逻辑，但还没有完成 DSH、OpenCode、Claude Code 等客户端的独立 Profile 与完整回归。
+
 ## 当前能力
 
 - 统一检查接口：`POST /v1/guard/check`
@@ -70,7 +72,7 @@ Content-Type: application/json
 
 - 最新一条真实用户消息命中硬拦截时，返回 `BLOCKED`；`system`/`developer` 内容按已定信任策略跳过扫描。
 - 仅历史消息命中硬拦截时，返回 `GUARDRAIL_INTERVENED`，将历史攻击文本替换为 `[REMOVED_BY_AGENT_GUARD]`，避免正常的新一轮输入被反复阻止，同时防止旧攻击继续进入模型上下文。
-- DSH/pi-ai 会把部分 system runtime-context 折叠为 `role=user`；这些合成消息不参与“最新用户消息”定位，避免真实攻击被误判为历史内容。
+- 已知 DSH/pi-ai 风格的部分 system runtime-context 会折叠为 `role=user`；当前保留了有限的 synthetic 前缀兼容逻辑。下一阶段会把这类逻辑移入可版本化的客户端 Profile，不再继续扩大通用前缀白名单。
 - 如果没有 `structured_messages`，默认严格模式下即使文本本身正常也拒绝，避免无法对齐时静默放行；显式设置 `AGENT_GUARD_ALIGNMENT=degraded_allowed` 才允许全量扫描的降级模式，且不给历史豁免。
 - 当结构化消息与扁平文本不匹配时，默认严格模式直接 `BLOCKED`；纯 `texts` 输入仍可全量扫描，但不享受历史豁免。
 - 本期验收 Chat 的结构化 `tool_calls` 和 `role=tool`。Responses 的 `function_call_output` 虽在 guard 被调用时可被检查，但纯工具项无文本请求可能在 LiteLLM 翻译层跳过 guard，属于后续适配。
@@ -116,6 +118,19 @@ curl http://127.0.0.1:8001/v1/guard/check \
 | `AGENT_GUARD_STREAM_HOLDBACK_CHARS` | `64` | OpenAI Chat 流式输出保留的尾部字符数；未闭合 PEM 动态扩大 |
 | `AGENT_GUARD_MAX_OUTPUT_TEXT_CHARS` | `1000000` | 输出侧单项累积扫描上限，超过时返回策略拦截而非 413 |
 | `AGENT_GUARD_MAX_OUTPUT_TOTAL_CHARS` | `2000000` | 输出侧总上限 |
+
+## 下一阶段：Chat 多客户端适配
+
+目标是让所有纳入范围的客户端都通过同一个 `/v1/chat/completions` Chat-only 入口，并在 guard 内得到稳定、可审计的语义解释。每个客户端至少需要一组真实夹具和以下断言：
+
+- 当前轮提示注入一定 `BLOCKED`；
+- 历史攻击不会反复阻断正常新输入；
+- runtime context/RAG/工具结果不会被误当真人当前输入；
+- 工具参数危险命令在执行前被拦截；
+- 密钥和 PII 在非流式、流式响应中均不泄漏；
+- 对齐失败时按 strict 策略拒绝，不静默放行。
+
+建议首批 Profile：`generic_chat`、`dsh_chat`、`opencode_chat`、`claude_code_chat`；若 Codex 等客户端实际配置为 Chat，也增加对应 Profile。Profile 识别必须以实际请求结构/header 为依据。
 
 ## 测试
 

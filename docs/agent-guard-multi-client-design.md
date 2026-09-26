@@ -2,8 +2,8 @@
 
 | 项目 | 内容 |
 | --- | --- |
-| 状态 | Proposed |
-| 版本 | v0.3 |
+| 状态 | Proposed（下一阶段实施规范） |
+| 版本 | v0.5 |
 | 日期 | 2026-09-26 |
 | 范围 | 方案设计，不包含代码实现 |
 | 核心组件 | agent-guard |
@@ -13,7 +13,7 @@
 | 执行优先级 | 见 [`protocol-adapter-design.md`](protocol-adapter-design.md) 第 12 章（P0–P4、R1） |
 | 对齐基准 | 协议方言与对齐层细节以 [`protocol-adapter-design.md`](protocol-adapter-design.md) 为准，见第 0 节 |
 
-> 本期执行范围（2026-09-26）：只验收客户端 `/v1/chat/completions`。Responses Profile 属后续适配；下文 D0–D6 是长期组件路线，不等于本期全部实现。以 [`protocol-adapter-design.md`](protocol-adapter-design.md) v0.4 的范围决策为准。
+> 当前状态（2026-09-26）：Chat-only 的 P0/P1 已完成。D0/D1 的 Envelope、稳定 item、对齐校验和 LiteLLM 动作兼容已经落地；下一阶段集中实施同一 `/v1/chat/completions` 下的多客户端 Profile。Responses Profile 仍属后续适配；D2–D6 是后续路线，不代表全部已实现。
 
 ## 0. 前置说明：与多协议设计的分工
 
@@ -37,9 +37,9 @@
 
 ## 1. 执行摘要
 
-当前 agent-guard 直接使用 LiteLLM `generic_guardrail_api` 传入的 `texts`、`structured_messages`、`tool_calls` 等字段，并通过数组下标和简单角色规则判断“本轮用户输入”和“历史消息”。
+当前 agent-guard 已使用 Envelope 和 Alignment Validator 处理 LiteLLM `generic_guardrail_api` 传入的 `texts`、`structured_messages`、`tool_calls` 等字段；P0/P1 已不再依赖未经校验的数组下标完成 Chat 主路径判定。
 
-该方式对单一客户端可以工作，但对不同架构的 Agent 客户端并不稳定。不同客户端可能存在以下差异：
+但“同一 Chat 协议下不同客户端的组装习惯”仍未全部建模，因此对 DSH、OpenCode、Claude Code 等客户端不能直接复用同一套当前轮/历史假设。不同客户端可能存在以下差异：
 
 - 是否发送完整历史，还是只发送当前轮。
 - system/developer/plugin 消息是否保留独立角色。
@@ -109,15 +109,16 @@ GUARDRAIL_INTERVENED
 
 ```text
 Agent Client
-    -> LiteLLM Proxy
+    -> Chat-only ingress
+    -> LiteLLM Proxy (loopback)
     -> generic_guardrail_api
     -> agent-guard
     -> upstream model
 ```
 
-安全控制在 `pre_call` 阶段执行。当前本地场景只启用了输入检查；输出检查是否启用取决于 LiteLLM 现有调用配置。由于本项目不能修改 LiteLLM，输出检测能力必须以实际存在的调用阶段为边界。
+安全控制在 `pre_call` 和 `post_call` 阶段执行；`config.local.yaml` 是仅用于输入侧的本地配置例外。由于本项目不能修改 LiteLLM，新增客户端仍必须以实际进入这些阶段的字段为边界。
 
-> v0.3 对齐（实测）：本仓库 `liteLLM/config.yaml` 已配置 `mode: [pre_call, post_call]`，`config.local.yaml` 只有 `pre_call`；输出侧**非流式**脱敏已验证生效，**流式**在默认 `block_only` 下不生效（需 `incremental_diff`），超长累积文本会触发 413 断流。结论与证据见多协议设计第 9 章。
+> 当前实现（实测）：`liteLLM/config.yaml` 已配置 `mode: [pre_call, post_call]`，并由 Chat-only 入口对外提供；`config.local.yaml` 只有 `pre_call`。Chat 输出侧非流式和 `incremental_diff` 流式脱敏已验证，长流增量扫描和 413 治理已实现。下一阶段补齐客户端 Profile；该状态不扩展到 Responses。
 
 ### 2.2 已暴露的典型问题
 
@@ -997,7 +998,7 @@ suspicious
 
 ### 13.3 LiteLLM 和客户端不可修改的限制
 
-> v0.3 对齐（实测）：本仓库 `liteLLM/config.yaml` 已启用 `pre_call` + `post_call`，`config.local.yaml` 只有 `pre_call`。输出侧非流式脱敏已验证生效；流式默认 `block_only` 下**不生效**，超长累积文本会触发 413 断流。对外的能力口径与排期见多协议设计第 9、12 章。
+> 当前实现：`liteLLM/config.yaml` 已启用 `pre_call` + `post_call`，并通过 Chat-only 入口对外提供。Chat 非流式、`incremental_diff` 流式、holdback、长流增量扫描均已验证；客户端 Profile 仍是下一阶段，Responses 不在本期范围。
 
 如果 LiteLLM 当前只调用 `pre_call`：
 
@@ -1144,51 +1145,47 @@ layer_trace
 
 ## 17. 分阶段实施建议
 
-本节只定义**组件路线**，不在本设计文档阶段实现。
+本节现在同时记录已完成组件和下一阶段实施路线；代码落地以本节的 Chat-only 多客户端目标为准。
 
-> v0.2 说明：执行顺序由 [`protocol-adapter-design.md`](protocol-adapter-design.md) 第 12 章统一排序（P0–P4、R1），本文 D 系列只描述“先建哪些组件”。对应关系：D0/D1 → A0；D2 → A2；D3 → A1（本期 Chat）、Responses 后续适配与 R1（Anthropic 预留）；D4 → A3；D5 → S1–S3；D6 不在协议适配范围内。
+> v0.5 说明：Chat P0/P1 已完成；本文 D 系列现在描述“已完成哪些基础组件、下一步怎样完成 Chat 多客户端闭环”。对应关系：D0/D1 → A0（基础已完成）；D2 → P2/A2（下一阶段 Chat Profile）；D3 → A1（本期 Chat 基础）与 Responses 后续适配、R1（Anthropic 预留）；D4 → A3；D5 → S1–S3；D6 不在当前协议适配范围内。
 
-### 阶段 D0：协议和夹具
+### 阶段 D0：协议和夹具（基础已完成，夹具继续扩充）
 
-- 固化 Canonical Context v1。
-- 建立 Profile 接口定义。
-- 建立脱敏黄金会话夹具。
-- 明确当前 LiteLLM 实际可用的阶段和字段。
+- 已固化 Chat Envelope、输入/输出动作契约和基础验证脚本。
+- 已明确当前 LiteLLM 可用的 pre_call/post_call 字段。
+- 下一阶段继续建立按客户端区分的脱敏黄金会话夹具。
 
-### 阶段 D1：内部 Canonical 化
+### 阶段 D1：内部 Canonical 化（基础已完成）
 
-- 将现有扁平文本处理包装为 Generic Profile。
-- 保持现有 LiteLLM 动作兼容。
-- 引入稳定 item ID。
-- 增加 profile、scope、confidence 元数据。
-- 不改变既有规则结论。
+- 已将扁平文本和结构化消息包装为通用 Envelope。
+- 已保持 LiteLLM `NONE`、`BLOCKED`、`GUARDRAIL_INTERVENED` 兼容。
+- 已引入稳定 item/origin 对齐信息和 strict degraded 处理。
+- 下一阶段补充 profile、scope、confidence 的客户端维度。
 
-### 阶段 D2：DSH Profile
+### 阶段 D2：Chat 客户端 Profile（下一阶段重点）
 
-- 将 DSH synthetic/context 规则移入 DSH Profile。
-- 实现 last non-synthetic user。
-- 实现历史攻击 neutralization。
-- 用真实 DSH 会话做回归。
-- 默认先 shadow，再 enforce。
+- 将 DSH synthetic/context 规则移入可版本化的 DSH Profile，而不是继续扩大通用前缀白名单。
+- 增加 `opencode_chat`、`claude_code_chat` 等实际使用客户端的 Profile；Codex 等若实际配置为 Chat，也按 Chat Profile 纳入。
+- 实现每个 Profile 的 current turn、history、context、tool result 解释。
+- 用真实或脱敏后的客户端会话做 contract tests 和 Chat-only 端到端回归。
+- 识别不确定时默认 strict/fail-closed，不采用“先 shadow 再放行”作为安全降级。
 
-### 阶段 D3：OpenAI 家族兼容（Anthropic 预留）
+### 阶段 D3：Chat Profile 契约与后续协议（部分基础已具备）
 
-- 增加 OpenAI Chat Profile。
-- Responses Profile 留待后续适配；不能按客户端名称默认归入本期验收。
-- 支持 role、content block 和 tool result 的不同形态。
-- 建立 Profile contract tests。
-- Anthropic Profile 预设接口但不实现（R1），仅在确有客户端使用时启用；Gemini 不接入。
+- OpenAI Chat 的基础 Envelope/对齐契约已具备。
+- 下一阶段把客户端 Profile 与 Chat Protocol Adapter 明确分层：Adapter 解释字段结构，Profile 解释客户端组装习惯。
+- Responses Profile 仍留待后续适配；Anthropic 预设接口但不实现（R1），Gemini 不接入。
 
-### 阶段 D4：路由级扫描策略
+### 阶段 D4：路由级扫描策略（下一阶段并行）
 
-- 配置 current/history/context/new-message 策略。
-- 支持 strict、latest-only、shadow、fail-closed。
-- 指标区分 Profile 和 fallback。
+- 按 Profile 配置 current/history/context/new-message 策略。
+- 对齐成功后才允许策略差异；对齐失败统一 strict/fail-closed。
+- 指标区分 Profile、confidence、fallback 和 degraded 原因。
 
-### 阶段 D5：输出和工具边界
+### 阶段 D5：输出和工具边界（P1 基础已完成，继续补 Profile 回归）
 
 - 在现有 LiteLLM 已提供输出 hook 的前提下接入输出检测。
-- OpenAI 流式输出优先（P1）：`incremental_diff` + guard 返回 `stream_holdback_chars`。
+- OpenAI Chat 流式输出的 `incremental_diff`、`stream_holdback_chars` 和保守增量扫描已完成；下一阶段为每个 Client Profile 补充流式回归。
 - 工具参数和工具结果独立建模。
 - 明确工具执行前检查是否具备可行性。
 
@@ -1232,8 +1229,8 @@ layer_trace
 ## 20. 决策与待确认事项
 
 1. 当前 LiteLLM 实例实际提供哪些调用阶段：`pre_call`、`post_call`、`during_call` 还是仅已知部分？
-2. 除 DSH 外，下一批需要支持哪些 Agent 客户端？（已明确：主场景为 OpenAI 家族——DSH 类走 Chat Completions，Codex 类走 Responses；Anthropic 预留、Gemini 不接入）
-3. 每个客户端的 `request_headers` 是否能提供稳定客户端标识？
+2. 除 DSH 外，下一批 Chat 客户端是否包含 OpenCode、Claude Code，以及哪些 Codex 客户端被配置为 Chat？实际路由必须以观测为准。
+3. 每个客户端的 `request_headers`、请求字段和消息组装是否能提供稳定识别信号？不能识别时如何安全降级？
 4. 哪些路由允许 latest-only，哪些必须 full-history？
 5. 哪些路由允许历史内容 neutralize，哪些必须 fail closed？
 6. 是否存在可用但有损的 session ID 或 conversation ID？
@@ -1244,7 +1241,7 @@ layer_trace
 
 ## 21. 结论
 
-在 LiteLLM 和客户端不可修改的约束下，agent-guard 无法获得完整、统一的客户端语义。最合适的方案不是继续向通用规则中加入客户端特判，而是：
+在 LiteLLM 和客户端不可修改的约束下，agent-guard 无法获得完整、统一的客户端语义。P0/P1 已完成 Chat 通用安全闭环；下一步仍不是把客户端特判塞进规则，而是：
 
 ```text
 固定 LiteLLM generic 入口

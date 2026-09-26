@@ -2,13 +2,15 @@
 
 | 项目 | 内容 |
 | --- | --- |
-| 状态 | Draft |
-| 版本 | v0.2 |
+| 状态 | Draft（含当前实现记录） |
+| 版本 | v0.3 |
 | 日期 | 2026-09-26 |
-| 范围 | 架构与设计，不包含代码实现 |
+| 范围 | 架构、当前实现边界与后续路线 |
 | 网关 | LiteLLM Proxy |
 | 安全服务 | agent-guard |
-| 语义检测模型 | Qwen3Guard |
+| 语义检测模型 | Qwen3Guard（后续 L3） |
+
+> 当前实现记录（2026-09-26）：Chat-only 入口、LiteLLM generic guardrail、agent-guard L1 Envelope/对齐校验、Chat 流式 `incremental_diff`、安全边界下的增量扫描均已落地并通过本机 HTTP 验收。Responses、Anthropic、Gemini 不属于当前交付范围。下一阶段重点是 `/v1/chat/completions` 下的多客户端 Profile 适配，而不是新增协议。
 
 ## 1. 文档目标
 
@@ -59,7 +61,8 @@
 
 ```mermaid
 flowchart LR
-  C[Client] --> L[LiteLLM Proxy]
+  C[Client] --> G[Chat-only ingress]
+  G --> L[LiteLLM Proxy]
   L -->|pre_call| I[agent-guard input]
   I --> D1{输入决策}
   D1 -->|allow/redact| M[上游模型]
@@ -88,13 +91,14 @@ flowchart LR
 
 ### 4.1 请求主路径
 
-1. 客户端请求进入 LiteLLM。
-2. LiteLLM 的输入 guardrail 调用 agent-guard。
-3. agent-guard 执行归一化、L1、L2 和必要的 L3 检测。
-4. 输入允许或被安全改写后，LiteLLM 调用上游模型。
-5. LiteLLM 的输出 guardrail 调用 agent-guard 的输出检测入口。
-6. agent-guard 判断是否允许、阻止、脱敏或转人工审核。
-7. 最终结果返回客户端。
+1. 客户端请求进入 Chat-only ingress；入口只允许 `/v1/chat/completions` 和 `/v1/models`。
+2. LiteLLM 后端仅监听回环地址。
+3. LiteLLM 的输入 guardrail 调用 agent-guard。
+4. agent-guard 执行 Envelope 对齐、L1，并在后续阶段接入 L2/L3。
+5. 输入允许或被安全改写后，LiteLLM 调用上游模型。
+6. LiteLLM 的输出 guardrail 调用 agent-guard 的输出检测入口。
+7. agent-guard 判断是否允许、阻止、脱敏或转人工审核。
+8. 最终结果返回客户端。
 
 ### 4.2 职责边界
 
@@ -128,15 +132,17 @@ LiteLLM 常见 guardrail 模式包括 `pre_call`、`post_call`、`during_call` �
 
 ### 5.3 版本兼容性检查项
 
-在实现前必须验证当前 LiteLLM 版本是否支持：
+以下能力已经在当前锁定的 LiteLLM 版本中完成实测；新增客户端仍需补充夹具和回归：
 
 - 输入与输出分别注册 guardrail。
 - 对 `messages`、`response.content` 和 `tool_calls` 的访问。
-- 在流式模式下逐块或累计检测。
+- Chat 流式 `incremental_diff` 和 `stream_holdback_chars`。
 - 修改请求或响应，而不只是抛出异常。
 - 配置 guardrail 超时、失败模式和重试行为。
 - 在日志和 trace 中关联同一个 `request_id`。
 - 排除内部 Qwen3Guard 调用，避免递归触发 guardrail。
+
+新增客户端仍必须验证其实际字段是否进入这些 LiteLLM 结构，并由 Profile 解释来源与轮次。
 
 ### 5.4 防止递归
 
@@ -427,7 +433,7 @@ Qwen3Guard 的分数只作为风险信号，不应直接等同于最终业务动
 
 ### 9.2 可选策略
 
-下表是通用取舍清单；v0.2 实测已把主场景（OpenAI 家族）的可选集合收窄为 `incremental_diff`，见 9.3。
+下表是通用取舍清单；当前 `/v1/chat/completions` 已选定并实测 `incremental_diff`，Responses/Anthropic 不在本期承诺范围。
 
 | 策略 | 优点 | 缺点 | 适用场景 |
 | --- | --- | --- | --- |
@@ -436,22 +442,22 @@ Qwen3Guard 的分数只作为风险信号，不应直接等同于最终业务动
 | 按句/块缓冲检测 | 平衡延迟和安全性 | 仍有有限泄漏窗口 | 一般业务 |
 | Qwen3Guard-Stream 或 chunk 检测 | 窗口更小 | 实现和部署复杂 | 大规模流式场景 |
 
-### 9.3 首期建议
+### 9.3 当前实现与下一阶段建议
 
 实测结论（LiteLLM 1.102.0 + agent-guard，证据与脚本见 `tools/`）：
 
 - 默认 `block_only` 下**脱敏不会到达客户端**：流式场景的改写必须显式配置才生效。
 - `streaming_transform_mode: incremental_diff` 可由配置开启（`generic_guardrail_api` 会透传 `streaming_*`），这是当前唯一能让流式脱敏真正生效的杠杆。
 - `streaming_buffer_until_moderated` 属 Bedrock 专用，`generic_guardrail_api` 未透出，**无法通过配置开启**。
-- 累积文本撞上 `AGENT_GUARD_MAX_TEXT_CHARS`（默认 5 万）时 agent-guard 返回 413，LiteLLM 断流，而明文此时已全部流出——既无保护又断流。
+- 旧的单项 5 万字符上限会导致 413；当前 Chat 输出使用独立输出上限，超过上限返回策略拦截，而不是把 413 冒泡成无保护断流。
 
-首期建议：
+当前实现与后续建议：
 
-- 主场景（OpenAI 家族）统一开启 `incremental_diff`，并由 guard 返回 `stream_holdback_chars` 覆盖跨 delta 边界。
-- 与流式体积治理同步落地：提高上限、按增量扫描、禁止 413 冒泡到 LiteLLM。
-- 非 OpenAI 路由只承诺 `block_only`（拦不改）；Anthropic 若启用需另行评审。
+- `/v1/chat/completions` 已开启 `incremental_diff`，guard 返回 `stream_holdback_chars`，并在安全边界下复用流式前缀扫描结果。
+- 对 PEM、编码、Unicode、非追加式内容或缺少稳定调用 ID 的情况，回退全量扫描。
+- Chat-only 入口负责隔离 Responses 等未验收路由。
+- 下一阶段对 DSH、OpenCode、Claude Code 等 Chat 客户端分别做 Profile 和流式回归。
 - 在文档和客户端协议中明确：超时、拒绝、截断和审核状态的处理方式。
-- 上述能力落地前，对外承诺必须写成“输入侧已防护；流式输出侧仅拦截、不脱敏”。
 
 详细设计与排期见 [`protocol-adapter-design.md`](protocol-adapter-design.md) 第 9 章与第 12 章（协议适配优先级 P1）。
 
@@ -557,7 +563,7 @@ Qwen3Guard 主要是文本安全模型。若后续需要图片、音频或视频
 
 ## 15. 性能与容量目标
 
-建议在实现前确定以下预算：
+在下一阶段多客户端 Profile 和后续 L2/L3 实施前，需要确定以下预算：
 
 - LiteLLM 引入的额外 P95 延迟。
 - L1 的目标 P95 延迟。
@@ -666,29 +672,26 @@ Client
 
 ## 19. 分阶段实施建议
 
-> 本节用 M0–M2 描述**里程碑范围**；当前场景下的执行优先级（P0–P4、R1）见 [`protocol-adapter-design.md`](protocol-adapter-design.md) 第 12 章。
+> 本节用 M0–M2 描述里程碑范围；当前执行以 Chat-only 的 P0/P1 收尾和下一阶段多客户端 Chat Profile 适配为准。Responses/Anthropic/Gemini 不纳入当前客户端闭环。
 
-### M0：最小可用安全链路
+### M0：Chat-only L1 安全链路（已完成）
 
-- 文本和非流式请求。
+- Chat-only ingress + 回环 LiteLLM。
 - LiteLLM 输入 `pre_call` 和输出 `post_call`。
-- L1 高精度规则。
-- 内存 + Redis 判决缓存。
-- Qwen3Guard Gen 模型。
-- allow/block 两种主要动作；脱敏能力可选。
-- shadow 模式观察误报和漏报。
-- 完整 `request_id`、`trace_id`、版本和层命中记录。
+- L1 静态规则和 LiteLLM 动作映射。
+- `NONE`、`BLOCKED`、`GUARDRAIL_INTERVENED` 三类主要动作。
+- `request_id`、`trace_id`、规则版本和层命中记录。
+- Redis、Qwen3Guard、shadow 误报观察和人工审核仍属于后续能力。
 
-### M1：增强控制能力
+### M1：Chat 多客户端闭环（下一阶段）
 
-- 输出脱敏和替换。
-- 流式按块/按句缓冲检测。
-- Qwen3Guard 小模型到大模型的升级策略。
-- 工具调用参数和工具结果检测。
-- 多轮上下文摘要。
-- 租户级策略和人工审核队列。
+- 冻结 DSH、OpenCode、Claude Code 等实际使用 Chat 的客户端夹具。
+- 建立 `generic_chat`、`dsh_chat`、`opencode_chat`、`claude_code_chat` 等 Profile。
+- 按请求结构/header 解析客户端来源、runtime context、RAG、工具调用和工具结果。
+- 为每个 Profile 建立对齐、当前轮、历史攻击、工具链、非流式脱敏和流式脱敏契约测试。
+- 识别不确定时 strict/fail-closed，不靠客户端名称或内容前缀猜测。
 
-### M2：生产强化
+### M2：生产强化与后续协议
 
 - Qwen3Guard-Stream 或更细粒度流式检测。
 - 多模态预处理。
@@ -699,10 +702,10 @@ Client
 
 在开始编码前需要确认：
 
-1. 目标 LiteLLM 版本及其 guardrail 接口能力。
-2. 是否必须支持流式输出的实时拦截。（部分结论：主场景为 OpenAI 流式输出，方案见 `protocol-adapter-design.md` 第 9 章）
-3. 是否只需要 allow/block，还是需要脱敏和响应替换。
-4. 是否需要检查 `tool_calls` 和工具返回内容。（部分结论：需要，见 `protocol-adapter-design.md` 第 7.5、12 章）
+1. 目标 Chat 客户端清单、真实路由和脱敏后的请求夹具。
+2. 每个客户端是否发送完整历史、工具结果和 runtime context。
+3. 各客户端的 Profile 识别信号、版本和回滚方式。
+4. 工具结果默认 block 还是 quarantine，以及哪些内容可改写。
 5. Qwen3Guard 的模型规模、量化方式和 GPU 资源。
 6. 可接受的输入和输出 P95 额外延迟。
 7. 哪些路由允许 fail-open，哪些必须 fail-closed。

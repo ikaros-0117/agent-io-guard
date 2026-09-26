@@ -71,6 +71,8 @@ agent-guard/.venv/bin/python tools/verify_chat_only_e2e.py
 
 本机启动入口、回环绑定的 LiteLLM、guard 和 mock 模型：确认 `/v1/responses` 等未知路由 404 且上游无调用，Chat 正常/攻击判决正确、SSE 脱敏正确，10 万字符逗号分隔长流中实际记录 `incremental=True`。这是本期 P0/P1 的主验收路径。后端回环端口不能直接对外开放。
 
+下一阶段会在这条测试链路上增加“客户端矩阵”：同一安全场景分别用 DSH、OpenCode、Claude Code 等真实或脱敏后的 Chat 请求夹具重放，比较 guard 判决和上游实际看到的内容。协议矩阵解决“字段是否漏扫”，客户端矩阵解决“同一 `/v1/chat/completions` 下不同客户端的语义是否被正确解释”。
+
 ## 协议矩阵与流式回归（进程内）
 
 ```bash
@@ -90,7 +92,7 @@ agent-guard/.venv/bin/python tools/verify_stream_guard_e2e.py
 
 Responses 为后续适配，当前有一项明确的 LiteLLM 边界缺口：请求若只有 `function_call_output` 且无可提取文本，翻译层直接返回，guard 调用为 0 次；脚本以 `[KNOWN GAP]` 明示。接入层在解决该缺口前不得允许这类纯工具项请求绕过扫描。
 
-当前矩阵状态（Chat 列为本期范围；Responses 列仅为后续诊断；未知 synthetic 前缀与 span 回写为后续范围）：
+当前协议矩阵状态（Chat 列为本期范围；Responses 列仅为后续诊断）。下一阶段另建客户端 Profile 矩阵；未知 synthetic 前缀与 span 回写仍是后续任务：
 
 | 场景 | OpenAI Chat（本期） | OpenAI Responses（后续） |
 | --- | --- | --- |
@@ -109,5 +111,6 @@ Anthropic 列仅作预留登记，Gemini 不在矩阵内。设计见 `docs/proto
 - **超长输入被硬拒**：单条 > `AGENT_GUARD_MAX_TEXT_CHARS` 时 agent-guard 返回 413，LiteLLM 因 `fail_on_error` + `unreachable_fallback: fail_closed` 直接让请求失败。想放行长文本必须调大上限或改降级策略。
 - **fail_closed 的代价是可用性**：agent-guard 挂掉时全部请求失败，实测返回 500（不是 400，因为没有策略判决）。
 - **system/developer 受信**：内容不扫描、不改写、返回 `NONE`；如需处理客户端伪造的受信角色，必须在接入鉴权层约束。
+- **多客户端尚未全部闭环**：当前通用 Chat 路径已通过 P0/P1 验收，但 DSH、OpenCode、Claude Code 等客户端仍需分别冻结夹具、实现 Profile 和完成回归；不能把一个客户端的通过结果自动扩展到所有 Chat 客户端。
 - **输出长流**：10 万字符与增量扫描已在真实 Chat-only 网关验证；仅安全逗号边界复用已扫描前缀，PEM、编码/Unicode、缺少调用 ID 等退回全量扫描。超过输出上限策略拦截，不承诺无限长流或所有内容都线性开销。
 - **脱敏会顺带做 NFKC 归一化**：`key：` 会变成 `key:`，见 `agent-guard/agent_guard/normalization.py` 的 `redaction_view`。
