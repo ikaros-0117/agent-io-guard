@@ -27,10 +27,8 @@ liteLLM/.venv/bin/python tools/verify_input_guard_inprocess.py
 | 历史含攻击 + 最新正常 | `GUARDRAIL_INTERVENED` | 历史替换为 `[REMOVED_BY_AGENT_GUARD]`，最新消息保留 |
 | 历史里的 `rm -rf /` 工具调用 | `BLOCKED` | 拒绝 |
 | 输入含密钥 | `GUARDRAIL_INTERVENED` | 消息被改写为 `[REDACTED_SECRET]` |
-| system 消息含注入 | `GUARDRAIL_INTERVENED` | 静默替换，不阻断 |
+| system 消息含注入 | `NONE` | 信任策略：不扫描、不改写 |
 | 单条输入 > 50000 字符 | `413` | LiteLLM 抛错，请求失败（fail_closed） |
-
-> 注：`system` 一行记录的是**当前实测行为**。决策 1 已把目标行为定为“`system` / `developer` 受信、不扫描、返回 `NONE`”（见 `docs/protocol-adapter-design.md` 决策 1 与 13 章矩阵），A0 落地后该行需同步改为 `NONE`。
 
 它证明不了"上游没被调用"——那需要第 2 层。
 
@@ -65,18 +63,43 @@ curl -s http://127.0.0.1:4000/v1/chat/completions \
 #    litellm guardrail request_id=... input_type=request decision=block action=BLOCKED ...
 ```
 
-## 待补：协议矩阵（P0/P1 回归）
+## Chat-only 入口端到端验收
 
-`tools/protocol_matrix.py`（待实现）以“协议 × 场景”为矩阵，断言的是判决与上游可见内容，覆盖最小夹具集：
+```bash
+agent-guard/.venv/bin/python tools/verify_chat_only_e2e.py
+```
 
-| 场景 | OpenAI Chat | OpenAI Responses |
+本机启动入口、回环绑定的 LiteLLM、guard 和 mock 模型：确认 `/v1/responses` 等未知路由 404 且上游无调用，Chat 正常/攻击判决正确、SSE 脱敏正确，10 万字符逗号分隔长流中实际记录 `incremental=True`。这是本期 P0/P1 的主验收路径。后端回环端口不能直接对外开放。
+
+## 协议矩阵与流式回归（进程内）
+
+```bash
+liteLLM/.venv/bin/python tools/protocol_matrix.py
+liteLLM/.venv/bin/python tools/verify_stream_guard_inprocess.py
+```
+
+协议矩阵使用 LiteLLM 真实 pre-call 翻译层与 guard ASGI 服务，断言判决和钩子返回的上游请求内容。Chat/Responses 各含五项诊断用例，但**本期只将 Chat 列作为安全验收**；Responses 的通过项不表示该路由完整受保护。流式进程内脚本使用真实 `incremental_diff` 钩子，覆盖跨 delta 密钥、跨 delta PEM、10 万字符与长流中密钥；**该脚本本身不经过 HTTP Proxy**，真实 Proxy 的 SSE 验证见下方。
+
+真实 Proxy 流式端到端（本机三个进程 + SSE mock 上游）：
+
+```bash
+agent-guard/.venv/bin/python tools/verify_stream_guard_e2e.py
+```
+
+拆分密钥、拆分 PEM 私钥以及 10 万字符长流中密钥均已验证客户端只收到脱敏文本且不中断。
+
+Responses 为后续适配，当前有一项明确的 LiteLLM 边界缺口：请求若只有 `function_call_output` 且无可提取文本，翻译层直接返回，guard 调用为 0 次；脚本以 `[KNOWN GAP]` 明示。接入层在解决该缺口前不得允许这类纯工具项请求绕过扫描。
+
+当前矩阵状态（Chat 列为本期范围；Responses 列仅为后续诊断；未知 synthetic 前缀与 span 回写为后续范围）：
+
+| 场景 | OpenAI Chat（本期） | OpenAI Responses（后续） |
 | --- | --- | --- |
-| 当前轮注入 | block | block（A0 后） |
-| tool 参数危险命令 | block | block（A1 后） |
-| `function_call_output` / `tool_result` 注入 | 按策略 | 检出（A1 后） |
+| 当前轮注入 | block | block |
+| tool 参数危险命令 | block | block（有可提取文本时） |
+| `function_call_output` / `tool_result` 注入 | block | 检出（有可提取文本时） |
 | 历史注入 + 当前轮正常 | 替换历史 | 替换历史 |
 | 未知前缀 synthetic 尾部 | 按当前轮处理（A2 后） | 同左 |
-| 流式输出密钥 | 不泄漏（S1 后） | 不承诺 |
+| 流式输出密钥 | 进程内钩子已验证 | 不承诺 |
 
 Anthropic 列仅作预留登记，Gemini 不在矩阵内。设计见 `docs/protocol-adapter-design.md` 第 13 章。
 
@@ -85,5 +108,6 @@ Anthropic 列仅作预留登记，Gemini 不在矩阵内。设计见 `docs/proto
 - **只在 Proxy 路径生效**：`litellm.callbacks` 里的 CustomGuardrail 在 SDK 直调路径（`litellm.acompletion`）不会被触发，实测 0 次调用。绕过网关直连模型 = 无保护。
 - **超长输入被硬拒**：单条 > `AGENT_GUARD_MAX_TEXT_CHARS` 时 agent-guard 返回 413，LiteLLM 因 `fail_on_error` + `unreachable_fallback: fail_closed` 直接让请求失败。想放行长文本必须调大上限或改降级策略。
 - **fail_closed 的代价是可用性**：agent-guard 挂掉时全部请求失败，实测返回 500（不是 400，因为没有策略判决）。
-- **system 消息注入不阻断**：当前实现把它当作"历史"静默替换（`GUARDRAIL_INTERVENED`）。目标行为已定为信任策略：`system` / `developer` 受信、不扫描、返回 `NONE`；A0 落地后本行与上表的断言都要同步更新。
+- **system/developer 受信**：内容不扫描、不改写、返回 `NONE`；如需处理客户端伪造的受信角色，必须在接入鉴权层约束。
+- **输出长流**：10 万字符与增量扫描已在真实 Chat-only 网关验证；仅安全逗号边界复用已扫描前缀，PEM、编码/Unicode、缺少调用 ID 等退回全量扫描。超过输出上限策略拦截，不承诺无限长流或所有内容都线性开销。
 - **脱敏会顺带做 NFKC 归一化**：`key：` 会变成 `key:`，见 `agent-guard/agent_guard/normalization.py` 的 `redaction_view`。

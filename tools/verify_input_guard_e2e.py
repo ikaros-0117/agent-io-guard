@@ -65,12 +65,16 @@ def wait_http(url: str, headers: dict[str, str] | None = None, timeout: float = 
 
 
 class Harness:
-    def __init__(self, args: argparse.Namespace) -> None:
+    def __init__(self, args: argparse.Namespace, *, stream_chunks: list[str] | None = None,
+                 chat_only: bool = False) -> None:
         self.args = args
         self.log_dir = Path(tempfile.mkdtemp(prefix="guard-verify-"))
-        self.upstream = MockUpstream().start()
+        self.upstream = MockUpstream(stream_chunks=stream_chunks).start()
+        self.stream_guard = stream_chunks is not None
+        self.chat_only = chat_only
         self.agent_port = free_port()
         self.proxy_port = free_port()
+        self.backend_port = free_port() if chat_only else None
         self.agent_proc: subprocess.Popen[bytes] | None = None
         self.proxy_proc: subprocess.Popen[bytes] | None = None
         self.config_path: Path | None = None
@@ -110,6 +114,10 @@ class Harness:
 
     def start_proxy(self) -> None:
         self.config_path = self.log_dir / "litellm.verify.yaml"
+        streaming_options = (
+            "      streaming_transform_mode: incremental_diff\n"
+            "      streaming_sampling_rate: 1" if self.stream_guard else ""
+        )
         self.config_path.write_text(
             f"""
 model_list:
@@ -127,12 +135,13 @@ guardrails:
   - guardrail_name: agent-guard
     litellm_params:
       guardrail: generic_guardrail_api
-      mode: [pre_call]
+      mode: [{"pre_call, post_call" if self.stream_guard else "pre_call"}]
       api_base: http://127.0.0.1:{self.agent_port}
       api_key: {TOKEN}
       default_on: true
       fail_on_error: true
       unreachable_fallback: fail_closed
+{streaming_options}
 
 general_settings:
   master_key: {MASTER_KEY}
@@ -141,22 +150,24 @@ general_settings:
             encoding="utf-8",
         )
         log = open(self.log_dir / "litellm.log", "wb")
+        command = (
+            [str(REPO / "liteLLM" / ".venv" / "bin" / "python"),
+             str(REPO / "liteLLM" / "serve_chat_only.py"), "--config", str(self.config_path),
+             "--port", str(self.proxy_port), "--backend-port", str(self.backend_port)]
+            if self.chat_only else
+            [self.args.litellm_bin, "--config", str(self.config_path),
+             "--host", "127.0.0.1", "--port", str(self.proxy_port)]
+        )
         self.proxy_proc = subprocess.Popen(
-            [
-                self.args.litellm_bin,
-                "--config",
-                str(self.config_path),
-                "--host",
-                "127.0.0.1",
-                "--port",
-                str(self.proxy_port),
-            ],
+            command,
             cwd=REPO / "liteLLM",
             env={**os.environ, "LITELLM_LOG": "ERROR"},
             stdout=log,
             stderr=subprocess.STDOUT,
         )
         headers = {"Authorization": f"Bearer {MASTER_KEY}"}
+        if self.chat_only and not wait_http(f"http://127.0.0.1:{self.backend_port}/v1/models", headers=headers, timeout=120):
+            raise RuntimeError("private LiteLLM backend did not become ready; see " + str(self.log_dir / "litellm.log"))
         if not wait_http(f"http://127.0.0.1:{self.proxy_port}/v1/models", headers=headers, timeout=120):
             raise RuntimeError("LiteLLM proxy did not become ready; see " + str(self.log_dir / "litellm.log"))
 

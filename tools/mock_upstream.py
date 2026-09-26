@@ -24,10 +24,12 @@ class MockUpstream:
     a caller can assert on what the model would have seen.
     """
 
-    def __init__(self, host: str = "127.0.0.1", port: int = 0, state_file: str | None = None) -> None:
+    def __init__(self, host: str = "127.0.0.1", port: int = 0, state_file: str | None = None,
+                 stream_chunks: list[str] | None = None) -> None:
         self._lock = threading.Lock()
         self._requests: list[dict[str, Any]] = []
         self._state_file = state_file
+        self.stream_chunks = stream_chunks
         self.port = port
         self._server = ThreadingHTTPServer((host, port), self._handler())
         self.port = self._server.server_address[1]
@@ -101,6 +103,30 @@ class MockUpstream:
             def do_POST(self) -> None:  # noqa: N802
                 body = self._read_body()
                 upstream._record(body)
+                if body.get("stream") and upstream.stream_chunks is not None:
+                    self.send_response(200)
+                    self.send_header("Content-Type", "text/event-stream")
+                    self.send_header("Cache-Control", "no-cache")
+                    self.send_header("Connection", "close")
+                    self.end_headers()
+                    for index, content in enumerate(upstream.stream_chunks):
+                        frame = {
+                            "id": "chatcmpl-mock", "object": "chat.completion.chunk",
+                            "created": 0, "model": body.get("model", "mock-model"),
+                            "choices": [{"index": 0, "delta": {
+                                **({"role": "assistant"} if index == 0 else {}), "content": content,
+                            }, "finish_reason": None}],
+                        }
+                        self.wfile.write(("data: " + json.dumps(frame) + "\n\n").encode())
+                        self.wfile.flush()
+                    end = {
+                        "id": "chatcmpl-mock", "object": "chat.completion.chunk",
+                        "created": 0, "model": body.get("model", "mock-model"),
+                        "choices": [{"index": 0, "delta": {}, "finish_reason": "stop"}],
+                    }
+                    self.wfile.write(("data: " + json.dumps(end) + "\n\ndata: [DONE]\n\n").encode())
+                    self.wfile.flush()
+                    return
                 messages = body.get("messages", [])
                 echo = "UPSTREAM_SAW:" + json.dumps(messages, ensure_ascii=False)
                 self._json(

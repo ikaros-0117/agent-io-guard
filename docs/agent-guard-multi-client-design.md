@@ -13,6 +13,8 @@
 | 执行优先级 | 见 [`protocol-adapter-design.md`](protocol-adapter-design.md) 第 12 章（P0–P4、R1） |
 | 对齐基准 | 协议方言与对齐层细节以 [`protocol-adapter-design.md`](protocol-adapter-design.md) 为准，见第 0 节 |
 
+> 本期执行范围（2026-09-26）：只验收客户端 `/v1/chat/completions`。Responses Profile 属后续适配；下文 D0–D6 是长期组件路线，不等于本期全部实现。以 [`protocol-adapter-design.md`](protocol-adapter-design.md) v0.4 的范围决策为准。
+
 ## 0. 前置说明：与多协议设计的分工
 
 本文与 [`protocol-adapter-design.md`](protocol-adapter-design.md) 是同一套架构的**总纲**与**落地规范**，不是两套并行方案。分工如下：
@@ -1144,7 +1146,7 @@ layer_trace
 
 本节只定义**组件路线**，不在本设计文档阶段实现。
 
-> v0.2 说明：执行顺序由 [`protocol-adapter-design.md`](protocol-adapter-design.md) 第 12 章统一排序（P0–P4、R1），本文 D 系列只描述“先建哪些组件”。对应关系：D0/D1 → A0；D2 → A2；D3 → A1（OpenAI 家族）与 R1（Anthropic 预留）；D4 → A3；D5 → S1–S3；D6 不在协议适配范围内。
+> v0.2 说明：执行顺序由 [`protocol-adapter-design.md`](protocol-adapter-design.md) 第 12 章统一排序（P0–P4、R1），本文 D 系列只描述“先建哪些组件”。对应关系：D0/D1 → A0；D2 → A2；D3 → A1（本期 Chat）、Responses 后续适配与 R1（Anthropic 预留）；D4 → A3；D5 → S1–S3；D6 不在协议适配范围内。
 
 ### 阶段 D0：协议和夹具
 
@@ -1172,7 +1174,7 @@ layer_trace
 ### 阶段 D3：OpenAI 家族兼容（Anthropic 预留）
 
 - 增加 OpenAI Chat Profile。
-- 增加 Responses Profile（Codex 类客户端，P0）。
+- Responses Profile 留待后续适配；不能按客户端名称默认归入本期验收。
 - 支持 role、content block 和 tool result 的不同形态。
 - 建立 Profile contract tests。
 - Anthropic Profile 预设接口但不实现（R1），仅在确有客户端使用时启用；Gemini 不接入。

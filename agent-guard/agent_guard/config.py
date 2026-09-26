@@ -24,6 +24,10 @@ class Settings:
     max_texts: int = 100
     max_text_chars: int = 50_000
     max_total_chars: int = 200_000
+    stream_holdback_chars: int = 64
+    max_output_text_chars: int = 1_000_000
+    max_output_total_chars: int = 2_000_000
+    alignment_mode: str = "strict"
 
     @classmethod
     def from_env(cls) -> "Settings":
@@ -33,6 +37,10 @@ class Settings:
                 "AGENT_GUARD_TOKEN is required; copy .env.example to .env and set a token"
             )
 
+        alignment_mode = os.getenv("AGENT_GUARD_ALIGNMENT", "strict").strip()
+        if alignment_mode not in {"strict", "degraded_allowed"}:
+            raise ValueError("AGENT_GUARD_ALIGNMENT must be strict or degraded_allowed")
+
         return cls(
             token=token,
             policy_version=os.getenv(
@@ -41,4 +49,8 @@ class Settings:
             max_texts=_positive_int("AGENT_GUARD_MAX_TEXTS", 100),
             max_text_chars=_positive_int("AGENT_GUARD_MAX_TEXT_CHARS", 50_000),
             max_total_chars=_positive_int("AGENT_GUARD_MAX_TOTAL_CHARS", 200_000),
+            stream_holdback_chars=_positive_int("AGENT_GUARD_STREAM_HOLDBACK_CHARS", 64),
+            max_output_text_chars=_positive_int("AGENT_GUARD_MAX_OUTPUT_TEXT_CHARS", 1_000_000),
+            max_output_total_chars=_positive_int("AGENT_GUARD_MAX_OUTPUT_TOTAL_CHARS", 2_000_000),
+            alignment_mode=alignment_mode,
         )

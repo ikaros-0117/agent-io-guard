@@ -96,3 +96,4 @@ class LiteLLMGuardrailResponse(BaseModel):
     action: Literal["NONE", "BLOCKED", "GUARDRAIL_INTERVENED"]
     blocked_reason: str | None = None
     texts: list[str] | None = None
+    stream_holdback_chars: list[int] | None = Field(default=None, exclude_if=lambda value: value is None)

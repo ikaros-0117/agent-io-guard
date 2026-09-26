@@ -1,6 +1,10 @@
 # agent-guard
 
-`agent-guard` 是 LiteLLM 前面的输入/输出安全检测服务。多客户端兼容的长期设计参见 [`../docs/agent-guard-multi-client-design.md`](../docs/agent-guard-multi-client-design.md)。本期只实现 **L1 静态规则层**，不做 L2 缓存、L3 Qwen3Guard、流式增量检测或人工审核。
+`agent-guard` 是 LiteLLM 前面的输入/输出安全检测服务。多客户端兼容的长期设计参见 [`../docs/agent-guard-multi-client-design.md`](../docs/agent-guard-multi-client-design.md)。本期只实现 **L1 静态规则层**，不做 L2 缓存、L3 Qwen3Guard 或人工审核；Chat 输出已有保守的增量扫描（无法证明安全时回退全量扫描）。
+
+## 本期路由范围
+
+本期安全验收仅针对客户端 `/v1/chat/completions`。`/v1/responses` 尚未完成适配验收；即使 guard 能处理其中部分字段，也不能承诺该路由已受保护。请用 `liteLLM/serve_chat_only.py` 启动项目提供的精确路由白名单入口，不要直接对外暴露 LiteLLM 本体；仅 `config.yaml` 不提供路由隔离。
 
 ## 当前能力
 
@@ -64,10 +68,12 @@ Content-Type: application/json
 
 多轮对话中，LiteLLM 会把全部历史消息传给 agent-guard。当前策略是：
 
-- 最新一条真实用户消息命中硬拦截时，返回 `BLOCKED`。
+- 最新一条真实用户消息命中硬拦截时，返回 `BLOCKED`；`system`/`developer` 内容按已定信任策略跳过扫描。
 - 仅历史消息命中硬拦截时，返回 `GUARDRAIL_INTERVENED`，将历史攻击文本替换为 `[REMOVED_BY_AGENT_GUARD]`，避免正常的新一轮输入被反复阻止，同时防止旧攻击继续进入模型上下文。
 - DSH/pi-ai 会把部分 system runtime-context 折叠为 `role=user`；这些合成消息不参与“最新用户消息”定位，避免真实攻击被误判为历史内容。
-- 如果没有 `structured_messages`，无法可靠区分历史与最新消息，因此继续采用全量检查并阻止。
+- 如果没有 `structured_messages`，默认严格模式下即使文本本身正常也拒绝，避免无法对齐时静默放行；显式设置 `AGENT_GUARD_ALIGNMENT=degraded_allowed` 才允许全量扫描的降级模式，且不给历史豁免。
+- 当结构化消息与扁平文本不匹配时，默认严格模式直接 `BLOCKED`；纯 `texts` 输入仍可全量扫描，但不享受历史豁免。
+- 本期验收 Chat 的结构化 `tool_calls` 和 `role=tool`。Responses 的 `function_call_output` 虽在 guard 被调用时可被检查，但纯工具项无文本请求可能在 LiteLLM 翻译层跳过 guard，属于后续适配。
 
 LiteLLM 调用示例：
 
@@ -106,6 +112,10 @@ curl http://127.0.0.1:8001/v1/guard/check \
 | `AGENT_GUARD_MAX_TEXTS` | `100` | 单次最多检查的文本项 |
 | `AGENT_GUARD_MAX_TEXT_CHARS` | `50000` | 单个文本最大字符数 |
 | `AGENT_GUARD_MAX_TOTAL_CHARS` | `200000` | 单次检查总字符数 |
+| `AGENT_GUARD_ALIGNMENT` | `strict` | 结构化与扁平文本错位时拦截；可设为 `degraded_allowed`（仍关闭历史豁免） |
+| `AGENT_GUARD_STREAM_HOLDBACK_CHARS` | `64` | OpenAI Chat 流式输出保留的尾部字符数；未闭合 PEM 动态扩大 |
+| `AGENT_GUARD_MAX_OUTPUT_TEXT_CHARS` | `1000000` | 输出侧单项累积扫描上限，超过时返回策略拦截而非 413 |
+| `AGENT_GUARD_MAX_OUTPUT_TOTAL_CHARS` | `2000000` | 输出侧总上限 |
 
 ## 测试
 

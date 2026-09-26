@@ -16,12 +16,14 @@ from .detector import (
     StaticRuleDetector,
     TextItem,
 )
+from .envelope import SecurityEnvelope, build_input_envelope
 from .models import (
     GuardCheckRequest,
     GuardCheckResponse,
     LiteLLMGuardrailRequest,
     LiteLLMGuardrailResponse,
 )
+from .output_stream import OutputStreamScanner
 from .rules import STATIC_RULES, RuleAction
 
 logger = logging.getLogger("agent_guard")
@@ -29,12 +31,18 @@ logger = logging.getLogger("agent_guard")
 STATIC_RULES_VERSION = "2026-09-21.2"
 HISTORICAL_BLOCK_PLACEHOLDER = "[REMOVED_BY_AGENT_GUARD]"
 _TEXT_SOURCE_RE = re.compile(r"^texts\[(\d+)\]$")
-_SYNTHETIC_USER_PREFIXES = (
-    "Current runtime context.",
-    "<system-reminder>",
-    "<runtime-context>",
-    "<environment_context>",
-)
+_PRIVATE_KEY_BEGIN_RE = re.compile(r"-----BEGIN(?: [A-Z]+)? PRIVATE KEY-----")
+_PRIVATE_KEY_END_RE = re.compile(r"-----END(?: [A-Z]+)? PRIVATE KEY-----")
+
+
+def _output_holdback(text: str, default: int) -> int:
+    """Keep an unfinished PEM block off the wire until it can be redacted."""
+    begins = list(_PRIVATE_KEY_BEGIN_RE.finditer(text))
+    if not begins:
+        return default
+    last_end = max((match.end() for match in _PRIVATE_KEY_END_RE.finditer(text)), default=-1)
+    pending = next((match for match in begins if match.start() >= last_end), None)
+    return max(default, len(text) - pending.start()) if pending else default
 
 
 def _content_texts(content: Any) -> list[str]:
@@ -138,34 +146,6 @@ def _deduplicate(items: list[TextItem]) -> list[TextItem]:
     return result
 
 
-def _is_synthetic_user_text(value: str) -> bool:
-    stripped = value.lstrip()
-    return any(stripped.startswith(prefix) for prefix in _SYNTHETIC_USER_PREFIXES)
-
-
-def _latest_user_text_indices(messages: list[dict[str, Any]]) -> set[int] | None:
-    """Map the latest real user turn into LiteLLM's flat texts list.
-
-    Harness/pi-ai folds in-history system messages into ``role=user`` messages.
-    Runtime-context snapshots therefore appear after the real user input; they
-    must not displace the actual human turn in latest-turn policy decisions.
-    """
-    text_index = 0
-    latest_user_indices: set[int] | None = None
-    for message in messages:
-        values = _content_texts(message.get("content"))
-        if str(message.get("role") or "").lower() == "user" and values:
-            current_indices = {
-                text_index + offset
-                for offset, value in enumerate(values)
-                if not _is_synthetic_user_text(value)
-            }
-            if current_indices:
-                latest_user_indices = current_indices
-        text_index += len(values)
-    return latest_user_indices
-
-
 def _text_source_index(source: str) -> int | None:
     match = _TEXT_SOURCE_RE.fullmatch(source)
     return int(match.group(1)) if match else None
@@ -189,14 +169,11 @@ def _litellm_response(
     payload: LiteLLMGuardrailRequest,
     result: DetectionResult,
     request_id: str,
+    envelope: SecurityEnvelope | None = None,
 ) -> LiteLLMGuardrailResponse:
     texts = list(payload.texts or [])
     sanitized_sources = {item.source for item in result.sanitized}
-    latest_user_indices = (
-        _latest_user_text_indices(payload.structured_messages or [])
-        if payload.input_type == "request"
-        else None
-    )
+    sources = envelope.by_source() if envelope is not None else {}
 
     historical_hard_indices: set[int] = set()
     current_hard_block = False
@@ -205,11 +182,10 @@ def _litellm_response(
     for finding in result.findings:
         source_index = _text_source_index(finding.source)
         if finding.action == RuleAction.HARD_BLOCK:
-            if (
-                source_index is not None
-                and latest_user_indices is not None
-                and source_index not in latest_user_indices
-            ):
+            item = sources.get(finding.source)
+            if (envelope is not None and envelope.alignment == "aligned"
+                and item is not None and item.scope == "history"
+                and item.content_type == "text" and source_index is not None):
                 historical_hard_indices.add(source_index)
             else:
                 current_hard_block = True
@@ -400,6 +376,7 @@ def _block_message(result: DetectionResult, request_id: str) -> str:
 def create_app(settings: Settings | None = None) -> FastAPI:
     settings = settings or Settings.from_env()
     detector = StaticRuleDetector(settings)
+    stream_scanner = OutputStreamScanner(detector)
     app = FastAPI(
         title="agent-guard",
         version="0.1.0",
@@ -449,10 +426,25 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         request: Request,
     ) -> LiteLLMGuardrailResponse:
         _authorize(request, settings)
-        items = _litellm_items(payload)
+        envelope = (
+            build_input_envelope(payload.texts, payload.structured_messages, payload.tool_calls)
+            if payload.input_type == "request" else None
+        )
+        items = envelope.scan_items if envelope is not None else _litellm_items(payload)
+        scanned = None
         try:
-            result = detector.check(items)
+            if (payload.input_type == "response" and payload.litellm_call_id
+                and payload.texts is not None and not payload.tool_calls):
+                scanned = stream_scanner.scan(payload.litellm_call_id, payload.texts)
+                result = scanned.result
+            else:
+                result = detector.check(items, output_limits=payload.input_type == "response")
         except InputTooLarge as exc:
+            if payload.input_type == "response":
+                logger.warning("litellm output exceeds guard scan limit; blocking request")
+                return LiteLLMGuardrailResponse(
+                    action="BLOCKED", blocked_reason="Output exceeds guard scan limit"
+                )
             raise HTTPException(status_code=413, detail=str(exc)) from exc
 
         request_id = (
@@ -460,11 +452,39 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             or payload.litellm_call_id
             or f"req-{uuid4()}"
         )
-        response = _litellm_response(payload, result, request_id)
+        response = _litellm_response(payload, result, request_id, envelope)
+        if scanned is not None and response.action != "BLOCKED":
+            response = (
+                LiteLLMGuardrailResponse(
+                    action="GUARDRAIL_INTERVENED", texts=list(scanned.sanitized_texts)
+                ) if scanned.sanitized_texts != tuple(payload.texts or ())
+                else LiteLLMGuardrailResponse(action="NONE")
+            )
+        if (envelope is not None and envelope.alignment == "degraded"
+            and settings.alignment_mode == "strict"):
+            response = LiteLLMGuardrailResponse(
+                action="BLOCKED", blocked_reason=f"Input alignment degraded; request_id={request_id}"
+            )
+        if payload.input_type == "response":
+            response.stream_holdback_chars = [
+                _output_holdback(text, settings.stream_holdback_chars)
+                for text in payload.texts or []
+            ]
+        sources = envelope.by_source() if envelope else {}
+        audit_refs = [
+            (item.item_id, item.origin_ref, finding.rule_id)
+            for finding in result.findings
+            if (item := sources.get(finding.source)) is not None
+        ]
         logger.info(
-            "litellm guardrail request_id=%s input_type=%s decision=%s action=%s findings=%s latency_ms=%.3f",
+            "litellm guardrail request_id=%s input_type=%s alignment=%s adapter_version=%s reason_codes=%s audit_refs=%s incremental=%s decision=%s action=%s findings=%s latency_ms=%.3f",
             request_id,
             payload.input_type,
+            envelope.alignment if envelope else "not_applicable",
+            envelope.adapter_version if envelope else "not_applicable",
+            envelope.reason_codes if envelope else (),
+            audit_refs,
+            scanned.incremental if scanned is not None else False,
             result.decision.value,
             response.action,
             len(result.findings),

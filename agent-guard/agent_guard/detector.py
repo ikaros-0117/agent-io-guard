@@ -66,8 +66,8 @@ class StaticRuleDetector:
         self.settings = settings
         self.rules = rules
 
-    def check(self, items: list[TextItem]) -> DetectionResult:
-        self._validate_limits(items)
+    def check(self, items: list[TextItem], *, output_limits: bool = False) -> DetectionResult:
+        self.validate_limits(items, output_limits=output_limits)
         started = time.perf_counter()
         findings: list[Finding] = []
         sanitized: list[SanitizedItem] = []
@@ -119,23 +119,27 @@ class StaticRuleDetector:
             latency_ms=latency_ms,
         )
 
-    def _validate_limits(self, items: list[TextItem]) -> None:
+    def validate_limits(self, items: list[TextItem], *, output_limits: bool = False) -> None:
         if len(items) > self.settings.max_texts:
             raise InputTooLarge(
                 f"too many text values: {len(items)} > {self.settings.max_texts}"
             )
 
+        max_text_chars = (self.settings.max_output_text_chars if output_limits
+                          else self.settings.max_text_chars)
+        max_total_chars = (self.settings.max_output_total_chars if output_limits
+                           else self.settings.max_total_chars)
         total_chars = 0
         for item in items:
             text_length = len(item.text)
-            if text_length > self.settings.max_text_chars:
+            if text_length > max_text_chars:
                 raise InputTooLarge(
-                    f"text value exceeds {self.settings.max_text_chars} characters"
+                    f"text value exceeds {max_text_chars} characters"
                 )
             total_chars += text_length
-        if total_chars > self.settings.max_total_chars:
+        if total_chars > max_total_chars:
             raise InputTooLarge(
-                f"total text exceeds {self.settings.max_total_chars} characters"
+                f"total text exceeds {max_total_chars} characters"
             )
 
     @staticmethod

@@ -30,6 +30,10 @@ guardrails:
       default_on: true
       fail_on_error: true
       unreachable_fallback: fail_closed
+      # Chat Completions streaming: emit only guard-transformed deltas.
+      streaming_transform_mode: incremental_diff
+      # Inspect every accumulated text update; holdback protects split tokens.
+      streaming_sampling_rate: 1
       extra_headers:
         - x-request-id
         - x-trace-id

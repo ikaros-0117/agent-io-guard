@@ -1,12 +1,16 @@
 # LiteLLM Gateway
 
-本目录直接使用官方 LiteLLM Proxy，不再维护自定义 FastAPI 网关。模型路由、输入/输出 guardrail、鉴权和 OpenAI 兼容 API 均由 LiteLLM 提供，只需要 `config.yaml`。
+本目录使用官方 LiteLLM Proxy 负责模型路由、guardrail 和鉴权；新增一个**只做路由白名单转发**的薄入口，避免直接暴露尚未验收的 Responses 等接口。入口不替代 LiteLLM 的协议处理。
 
 ```text
-Client -> LiteLLM Proxy -> agent-guard -> Upstream LLM
+Client -> chat_only_gateway (:4000) -> LiteLLM Proxy (127.0.0.1:4001) -> agent-guard -> Upstream LLM
 ```
 
 启动 LiteLLM 前，需先按 [`agent-guard/README.md`](../agent-guard/README.md) 启动 L1 服务，并保证两侧的 `AGENT_GUARD_BASE_URL` 与 `AGENT_GUARD_TOKEN` 一致。
+
+## 本期路由范围
+
+**只对客户端 `/v1/chat/completions` 的输入和输出作本期安全承诺。** `/v1/responses` 留待后续适配，现有代码/测试部分通过不代表全路径受保护。**必须通过 `serve_chat_only.py` 启动或使用本目录 Docker 镜像**：`chat_only_gateway.py` 对外只允许 `POST /v1/chat/completions` 与 `GET /v1/models`，其余精确路径均 404；LiteLLM 本体只监听容器/主机内部 `127.0.0.1:4001`。`config.yaml` 本身不封禁路由，不能单独把 LiteLLM 暴露给客户端。
 
 ## 配置组成
 
@@ -33,15 +37,17 @@ cp .env.example .env
 set -a
 source .env
 set +a
-uv run litellm --config config.yaml --host 0.0.0.0 --port 4000
+uv run python serve_chat_only.py --config config.yaml --host 127.0.0.1 --port 4000 --backend-port 4001
 ```
 
-也可以直接使用 Docker：
+也可以直接使用 Docker（镜像入口默认启用 Chat-only，容器只映射 4000）：
 
 ```bash
 docker build -t litellm-gateway .
 docker run --rm -p 4000:4000 --env-file .env litellm-gateway
 ```
+
+对外只暴露入口 `:4000`；后端 `:4001` 必须保持回环绑定，不能通过容器端口映射、反向代理或本机不可信进程直接访问。客户端向 `/v1/responses`、直通路由及其它未列入白名单的路径请求会被入口拒绝。
 
 ## 调用
 
@@ -110,4 +116,6 @@ Content-Type: application/json
 - 模型 Key 和客户端 Key 都通过环境变量提供。
 - `master_key` 只适合单管理员/本地环境；生产环境应使用 LiteLLM 虚拟 Key、团队和预算配置。
 - 默认使用 `fail_closed`，agent-guard 不可用时阻止请求。
-- 如需检查流式响应，应结合当前 LiteLLM 版本配置 `streaming_end_of_stream_only`、`streaming_sampling_rate` 和 `streaming_transform_mode`。
+- 主配置已对 OpenAI Chat 流式输出启用 `streaming_transform_mode: incremental_diff` 和 `streaming_sampling_rate: 1`，配合 guard 的 `stream_holdback_chars` 使脱敏后的增量到达客户端。Responses/Anthropic 流式输出不在该模式的承诺范围内。
+- `config.local.yaml` 只配置 `pre_call`，不会提供输出侧保护；不要用它验收流式输出。
+- 输出超过 guard 配置的独立上限时返回策略拦截（不再冒泡 413）。稳定调用 ID + 安全逗号边界下只扫新增后缀；遇到 PEM、编码/Unicode、无法确定的边界或缺少调用 ID 时保守地全量扫描。不是对任意内容保证恒定扫描开销。

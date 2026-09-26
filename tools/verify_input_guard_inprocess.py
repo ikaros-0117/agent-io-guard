@@ -186,7 +186,7 @@ async def scenario_input_secret() -> None:
 
 
 async def scenario_system_injection() -> None:
-    name = "6 system 消息含攻击 -> 静默替换（不阻断）"
+    name = "6 system 消息按信任策略跳过 -> NONE"
     _, handler, result, error = await pre_call(
         [{"role": "system", "content": INJECTION}, {"role": "user", "content": "今天天气怎么样"}]
     )
@@ -194,7 +194,8 @@ async def scenario_system_injection() -> None:
         return check(name, False, f"抛异常: {type(error).__name__}")
     messages = (result or {}).get("messages", [])
     detail = f"判决={only_action(handler)}, system={messages[0].get('content')!r}" if messages else "无消息"
-    check(name, bool(messages) and messages[0].get("content") == "[REMOVED_BY_AGENT_GUARD]", detail)
+    check(name, only_action(handler) == "NONE" and bool(messages)
+          and messages[0].get("content") == INJECTION, detail)
 
 
 async def scenario_oversized_input() -> None:

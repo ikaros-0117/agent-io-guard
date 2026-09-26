@@ -3,15 +3,19 @@
 | 项目 | 内容 |
 | --- | --- |
 | 状态 | Proposed |
-| 版本 | v0.3 |
+| 版本 | v0.4 |
 | 日期 | 2026-09-26 |
 | 范围 | 协议适配规范与落地优先级，不包含代码实现 |
 | 固定上游 | LiteLLM Proxy `generic_guardrail_api` |
 | 关键约束 | 不修改 LiteLLM 代码，修复集中在 agent-guard |
 
+> 本期范围决策（2026-09-26）：**只对客户端 `/v1/chat/completions` 作 P0/P1 安全验收和承诺；`/v1/responses` 后续适配，不作为本期交付条件。** 已有 Responses 代码和测试是预研，不等于完整支持。本期提供 `liteLLM/serve_chat_only.py` 作为路由隔离入口；`config.yaml` 本身不封禁 Responses，直接暴露 LiteLLM 后端不属于本期安全部署。下文 F6 与 Responses 适配规则保留作为后续设计，旧版“OpenAI 家族均属 P0”的措辞以本决策及第 12–14 章更新为准。
+
+> 实施记录（2026-09-26）：本文仍保留为设计规范。P0 的 guard 侧 A0/A1 与 P1 的 Chat S1、10 万字符有界扫描/超限策略拦截已实现；进程内协议矩阵和 Chat 流式真实 Proxy SSE 测试通过。但 Responses 只有工具项、没有可提取文本时，当前 LiteLLM 翻译层直接跳过 guard（`tools/protocol_matrix.py` 记录为 `KNOWN GAP`）；S2 已增加按调用 ID 的保守增量扫描：只有安全逗号边界可复用前缀，其余回退全量；Chat-only 入口下真实 HTTP 的 10 万字符带密钥流已通过。Responses 子集测试仍不属于本期协议承诺。
+
 本文承接 [`agent-guard-multi-client-design.md`](agent-guard-multi-client-design.md) 第 6 章（目标架构）、第 7 章（Canonical Context Model）、第 10/11 章（Scan Scope 与规则适用模型），把“协议差异”这一层写成可实现的规范。
 
-- 适用对象：**下游边界**上的请求形态——OpenAI Chat Completions、OpenAI Responses API（A2A 与 DSH/pi-ai 类自有客户端按其实际线格式归入其一）；Anthropic Messages 预留；Gemini generateContent 不接入。上游部署协议不在范围内（见第 0 节）。
+- 适用对象：**下游边界**上的请求形态——本期 OpenAI Chat Completions；OpenAI Responses API 后续适配（A2A 与 DSH/pi-ai 类自有客户端仍须按实际线格式分类）；Anthropic Messages 预留；Gemini generateContent 不接入。上游部署协议不在范围内（见第 0 节）。
 - 被解决的问题：LiteLLM 只保证“传输层归一化”，不保证“语义归一化”。当前 L1 实现把两者混在一起，靠数组下标对齐，导致协议不同则行为不同。
 - 不在本文范围：L2/L3 检测器、多租户策略存储、规则内容本身。
 - 设计约束：**不修改 LiteLLM 代码**，改动集中在 guard 服务内。LiteLLM 的配置文件（`liteLLM/config.yaml`）属我方资产，可以调整；fork 或改动 LiteLLM 源码不在本方案内。
@@ -33,14 +37,14 @@ v0.2 变更：新增第 0 节“两层协议边界”；第 1.1 节与第 12 章
 1. **“OpenAI 兼容”是一个家族，不是一种协议。** 当前客户端至少产生两种结构不同的请求形态：
    - **Chat Completions**：`messages[]`，role 为 system / developer / user / assistant / tool。DSH 类客户端走这条。
    - **Responses API**：`instructions` + `input[]`，其中含 `function_call` / `function_call_output` item。Codex 类客户端走这条。
-   两者在 LiteLLM 的 ingress 字段结构不同（见 2.2 的 F6），必须分别解释，不能共用一套下标逻辑。
+   两者在 LiteLLM 的 ingress 字段结构不同（见 2.2 的 F6）；本期只验收 Chat，后续启用 Responses 时必须分别解释，不能共用一套下标逻辑。
 2. **上游协议不构成风险，下游方言构成风险。** 我们不需要知道模型怎么部署，只需要知道客户端发来的 `instructions`、`function_call_output` 落在哪个字段。
-3. **输入形状是封闭的小集合。** 只要 LiteLLM 未开启直通路由、客户端只调用 `/v1/chat/completions` 与 `/v1/responses`，guard 需要处理的形态就固定为下表——这是本文全部设计的前提。
+3. **输入形状是封闭的小集合。** 只要 LiteLLM 未开启直通路由、本期客户端只调用 `/v1/chat/completions`（后续才考虑 `/v1/responses`），guard 需要处理的形态就固定为下表——这是本文全部设计的前提。
 
 | 形态 | 来源 | 本文定位 |
 | --- | --- | --- |
 | OpenAI Chat Completions | 客户端 `messages[]` | 主场景（优先级见 1.1） |
-| OpenAI Responses API | 客户端 `instructions` + `input[]` | 主场景（优先级见 1.1） |
+| OpenAI Responses API | 客户端 `instructions` + `input[]` | 后续适配；本期不承诺 |
 | Anthropic Messages | 直通路由 | 预留（R1），仅在确有客户端使用时启用 |
 | Gemini generateContent | 直通路由 | 不接入，仅登记缺口 |
 | 上游部署协议 | LiteLLM 内部 | 不适用，guard 不可见 |
@@ -60,7 +64,8 @@ v0.2 变更：新增第 0 节“两层协议边界”；第 1.1 节与第 12 章
 
 | 分类 | 协议 / 场景 | 处理方式 |
 | --- | --- | --- |
-| 主场景 | OpenAI 家族：Chat Completions + Responses API，**输入 + 流式输出** | 全部验收标准的默认对象；Codex 类客户端走 Responses，DSH 类走 Chat Completions |
+| 本期主场景 | `/v1/chat/completions`，输入 + 流式文本输出 | P0/P1 的唯一默认验收路由；按实际路由确认客户端，不按名称推断 |
+| 后续适配 | `/v1/responses` | 已有局部实现与测试，但纯工具项请求可能绕过 guard；本期不承诺，接入前须另行验收 |
 | 次场景 | OpenAI Chat 非流式输出 | 现状已可用，仍需 span 回写（A4） |
 | 预留 | Anthropic Messages | 使用量预计很少或不用；不投入专门设计，靠通用修法覆盖，启用时按第 13 章矩阵回归（R1） |
 | 不接入 | Gemini generateContent | 可预见未来不使用：只登记为已知缺口，不做适配，也不做缓解设计 |
@@ -70,8 +75,8 @@ v0.2 变更：新增第 0 节“两层协议边界”；第 1.1 节与第 12 章
 
 | 优先级 | 范围 | 内容 | 阶段 |
 | --- | --- | --- | --- |
-| **P0** | OpenAI 家族输入侧 | 对齐校验 + `degraded` 语义；结构化字段补扫 | A0、A1 |
-| **P1** | OpenAI 流式输出侧 | 流式脱敏真正生效；流式体积治理（禁止 413 断流） | S1、S2 |
+| **P0** | Chat Completions 输入侧 | 对齐校验 + `degraded` 语义；结构化字段补扫 | A0、A1 |
+| **P1** | Chat Completions 流式文本输出侧 | 流式脱敏真正生效；流式体积治理（禁止 413 断流） | S1、S2 |
 | **P2** | 客户端识别 | DSH 类 synthetic 尾部按 Profile 识别，取消固定前缀白名单 | A2 |
 | **P3** | 工具链与改写质量 | 工具结果策略；span 双视图回写 | A3、A4 |
 | **P4** | 残余风险文档化 | 输出侧 `tool_call` 缺口 + 路由前置条件 | S3 |
@@ -80,8 +85,8 @@ v0.2 变更：新增第 0 节“两层协议边界”；第 1.1 节与第 12 章
 推论：
 
 - **P0 + P1 是最小安全闭环**：输入判得准 + 流式输出不泄漏。这两项完成前，不应对外承诺“输入输出均已防护”。
-- 验收矩阵只以 OpenAI 家族为准（第 13 章），Anthropic 列标为“预留”，Gemini 列移出。
-- 本期重点从“多协议覆盖”转为两件事：**OpenAI 家族输入判定的正确性**（A 系列）与**OpenAI 流式输出的实际防护**（S 系列）。
+- 本期验收矩阵只以 Chat Completions 为准（第 13 章）；Responses 与 Anthropic 为后续/预留，Gemini 不接入。
+- 本期重点是 **Chat 输入判定正确性**（A 系列）与 **Chat 流式文本输出防护**（S 系列）；Responses 不因复用通用代码而自动进入承诺范围。
 - 上游部署协议不占优先级：不写缓解、不做回归，避免把不可见的差异当成自己的工作量。
 - Gemini 的已知缺口继续在本文记录，避免以后接进来时当成新发现。
 
@@ -354,11 +359,11 @@ view = canonicalize(raw) 匹配视图
 | --- | --- | --- |
 | OpenAI Chat（非流式） | `choices[].message.content` / `tool_calls` | **主场景**：文本脱敏回写；`tool_calls` 命中即 `block` |
 | OpenAI Chat（流式） | `delta.content` 增量 | **主场景**：用 `incremental_diff` 让改写真正到达客户端（9.2） |
-| OpenAI Responses | `output[]` items | 次场景：逐 item 建 canonical，文本可回写 |
+| OpenAI Responses | `output[]` items | 后续适配：逐 item 建 canonical 并单独验收，当前不承诺 |
 | Anthropic Messages | content blocks | 预留：文本块可回写；`tool_use.input` 只检测不改写 |
 | Gemini generateContent | `parts[]` | 不接入：仅登记缺口 |
 
-### 9.2 OpenAI 流式输出（本期重点）
+### 9.2 OpenAI Chat 流式输出（本期重点）
 
 可用杠杆**全部是配置级**，初始化链路已确认：`generic_guardrail_api/__init__.py` 的 `initialize_guardrail` 会把 `litellm_params` 里的 `streaming_*` 透传给 `GenericGuardrailAPI`，即只改 `liteLLM/config.yaml` 就能生效。
 
@@ -490,9 +495,9 @@ def build_envelope(payload):
 
 重排依据（当前使用场景的固定事实）：
 
-1. **主场景是 OpenAI 家族的输入 + 流式输出**：输入侧要“判得准”，输出侧要“真的改写得了”，两者是同一条链路上的一等公民，不能只做一半。
+1. **本期主场景是 Chat Completions 的输入 + 流式输出**：输入侧要“判得准”，输出侧要“真的改写得了”，两者是同一条链路上的一等公民，不能只做一半。
 2. **上游部署协议对 guard 不可见**（第 0 节）：归一化由 LiteLLM 完成，guard 不为上游差异增加适配或回归。
-3. **输入侧漏检是安全缺口，输出侧脱敏失效是静默失败**：优先级 P0 修前者（F1/F2/F6 已实测为降级或漏检），优先级 P1 修后者（现状是客户端能收到明文密钥）。
+3. **输入侧漏检是安全缺口，输出侧脱敏失效是静默失败**：本期 P0 验收 Chat 输入正确性，P1 验收 Chat 流式文本脱敏；F1/F2/F6 的 Responses 证据保留为后续适配依据。
 4. **Anthropic 与 Gemini 不参与排期**：Gemini 不使用；Anthropic 极少或不用，且 A0/A1 的通用修法本就是从它的实测缺陷中提炼的，天然覆盖。
 5. **改写质量影响合规承诺**：span 回写（A4）修复“脱敏顺带把全角标点改成半角”，属于正确性问题而非漏检问题，排在 P3。
 
@@ -500,21 +505,21 @@ def build_envelope(payload):
 
 | 顺序 | 阶段 | 交付定义（可对外承诺的能力） |
 | --- | --- | --- |
-| P0 | A0、A1 | Chat Completions 与 Responses 下，当前轮注入、工具参数危险命令、工具结果注入均给出正确判决；对齐失败时不静默放行 |
-| P1 | S1、S2 | OpenAI 流式输出可脱敏（含跨 delta 边界），且不因超长而断流 |
+| P0 | A0、A1 | `/v1/chat/completions` 下当前轮注入、工具参数危险命令、工具结果注入判决正确；对齐失败不静默放行 |
+| P1 | S1、S2 | Chat 流式文本可脱敏（含跨 delta 边界），且 10 万字符输出不断流；安全边界走增量扫描，不确定时回退全量 |
 | P2 | A2 | DSH 类未知前缀按当前轮处理，误拦用例归零 |
 | P3 | A3、A4 | 工具结果注入按策略阻断；改写后未命中字符逐字节不变 |
 | P4 | S3 | 残余风险与路由前置条件写进文档，不再依赖隐性假设 |
 | R1 | R1 | 仅在确有 Anthropic 客户端时启用，按第 13 章矩阵回归 |
 
-**最小安全闭环 = P0 + P1。** 在这两项完成前，`liteLLM/config.yaml` 的对外承诺应显式写为“输入侧已防护；流式输出侧仅拦截、不脱敏”。
+**本期最小安全闭环仅针对 `/v1/chat/completions` 的 P0 + P1。** 本期验收必须从 Chat-only 入口进入；直接连接 LiteLLM 私有端口或单独暴露 `config.yaml` 启动的 Proxy 不在承诺范围。
 
 ### 12.2 阶段定义
 
 | 阶段 | 优先级 | 内容 | 修复 | 验收 |
 | --- | --- | --- | --- | --- |
-| A0 | P0 | Envelope Builder + Alignment Validator + `degraded` 语义 | F1（含 Responses 的 `instructions` 错位） | OpenAI Chat 与 Responses 下“当前轮注入”均为 `BLOCKED` |
-| A1 | P0 | 结构化字段补扫：`structured_messages[].tool_calls`、`role=tool`、`function_call_output` | F2、F6 | Codex 类客户端的危险命令与工具输出注入均被检出 |
+| A0 | P0 | Envelope Builder + Alignment Validator + `degraded` 语义 | Chat 对齐错误；Responses 的 F1/F6 留作后续 | Chat 下“当前轮注入”为 `BLOCKED` |
+| A1 | P0 | 结构化字段补扫：Chat `tool_calls`、`role=tool`；Responses `function_call_output` 为后续 | Chat 工具字段漏扫；Responses F2/F6 留作后续 | Chat 的危险命令与工具输出注入均被检出 |
 | S1 | P1 | `incremental_diff` 配置 + guard 返回 `stream_holdback_chars` | 流式脱敏不生效 | 流式密钥不泄漏（含跨 delta 边界） |
 | S2 | P1 | 流式体积治理：上限、增量扫描、禁止 413 断流 | 长输出断流 | 10 万字符流式输出仍给出判决且不断流 |
 | A2 | P2 | synthetic 识别改为按 Profile 配置，取消固定前缀白名单 | C2 漏判、C3 误拦 | 未知前缀按当前轮处理；误拦用例归零 |
@@ -537,11 +542,11 @@ def build_envelope(payload):
 
 ### 12.3 下一步（可开工的最小任务包）
 
-按 P0 + P1 的交付定义，第一步的产出固定为下面这一组，顺序即依赖顺序：
+按本期 Chat P0 + P1 的交付定义，下面列出实施与剩余验收顺序；Responses 的诊断夹具不计入本期交付：
 
-1. `tools/protocol_matrix.py`：以 OpenAI Chat × OpenAI Responses 为矩阵，先固化**当前行为**作为基线（F1/F2/F6 会以“实际判决”的形式被记录，先红后绿）。
-2. A0：Envelope Builder + Alignment Validator；`alignment=degraded` 时关闭历史豁免（修 F1、F6 的降级路径）。
-3. A1：补扫 `structured_messages[].tool_calls`、`role=tool`、`function_call_output`（修 F2、F6 的漏检路径）。
+1. `tools/protocol_matrix.py`：已有 Chat × Responses 诊断矩阵；**本期只把 Chat 列作为验收**。Responses 列与 `KNOWN GAP` 保留为后续适配基线。
+2. A0：Envelope Builder + Alignment Validator；Chat `alignment=degraded` 时关闭历史豁免。
+3. A1：验收 Chat `structured_messages[].tool_calls`、`role=tool`；Responses `function_call_output` 后续单独验收。
 4. S1：`liteLLM/config.yaml` 开启 `streaming_transform_mode: incremental_diff`，guard 响应新增 `stream_holdback_chars`（默认 64，见决策 2）。
 5. S2：流式体积治理，禁止 413 冒泡到 LiteLLM。
 
@@ -549,9 +554,9 @@ def build_envelope(payload):
 
 ## 13. 回归夹具
 
-`tools/protocol_matrix.py`（待实现）应以“协议 × 场景”为矩阵，断言的是**判决与上游可见内容**，不是内部字段：
+`tools/protocol_matrix.py` 已实现诊断矩阵，断言**判决与钩子返回的上游可见内容**；本期仅 Chat 列为交付验收，Responses 列用于后续适配基线：
 
-| 场景 | OpenAI Chat | OpenAI Responses | Anthropic（预留） |
+| 场景 | OpenAI Chat（本期验收） | OpenAI Responses（后续适配） | Anthropic（预留） |
 | --- | --- | --- | --- |
 | 当前轮注入 | block | **block（A0 后）** | block |
 | system/developer 内注入 | **不扫描，返回 `NONE`（决策 1）** | 同左 | 同左 |
@@ -563,7 +568,7 @@ def build_envelope(payload):
 | 流式输出密钥（`incremental_diff`） | **不泄漏（S1 后）** | 不承诺 | 不承诺 |
 | 超长流式输出（>5 万字符） | **不断流（S2 后）** | 不承诺 | 不承诺 |
 
-> v0.2：矩阵只以 OpenAI 家族为验收对象；Anthropic 列仅作预留登记，Gemini 列已移出。P0（A0/A1）与 P1（S1/S2）相关行属于**最小夹具集**，必须先落地。
+> v0.4：本期仅 Chat 列的 P0/P1 行为最小验收集。Responses 列只是诊断/后续目标；纯工具项无普通文本时当前 LiteLLM 可跳过 guard，不能凭其它测试行推断其已受保护。Anthropic 预留，Gemini 不接入。
 
 ## 14. 决策、开放问题与验收标准
 
@@ -584,7 +589,7 @@ def build_envelope(payload):
 
 ### 14.3 验收标准
 
-- 同一语义请求在 OpenAI 家族两种方言（Chat Completions / Responses）下产生等价判决；Anthropic 预留，启用时纳入同一标准（允许方言导致的 `mutable` 差异，但必须显式记录原因）。
+- 本期 `/v1/chat/completions` 的输入判决、工具字段检查和流式文本脱敏符合第 13 章 Chat 列；后续启用 Responses/Anthropic 时再要求同一语义请求的等价判决（允许方言导致的 `mutable` 差异，但必须显式记录原因）。
 - `alignment=degraded` 时不存在任何“静默放行”路径。
 - 改写后的文本除命中区间外与输入逐字节一致。
 - 所有判决可追溯到 `item_id` + `origin_ref` + `adapter_version`，且日志不含原文。
