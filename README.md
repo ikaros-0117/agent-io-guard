@@ -61,6 +61,7 @@ Client -> Chat-only ingress -> LiteLLM Proxy -> agent-guard -> Memory/Redis/Qwen
 
 - [完整架构设计](docs/architecture.md)：整体方案、三层检测流水线、流式与降级策略。
 - [agent-guard 多客户端兼容与统一安全控制设计](docs/agent-guard-multi-client-design.md)：Canonical Context、Profile Registry 与 D0–D6 组件路线。
+- [Chat 多客户端适配代码级开发文档](docs/chat-multi-client-adaptation-implementation.md)：DeepSeek/代码代理执行用的文件级任务、接口、夹具、测试和验收清单。
 - [多协议输入输出适配设计](docs/protocol-adapter-design.md)：协议边界、Canonical Security Envelope、缺陷证据与执行优先级（第 12 章）。
 - [LiteLLM 网关实现与运行说明](liteLLM/README.md)
 - [agent-guard L1 服务与运行说明](agent-guard/README.md)

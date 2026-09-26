@@ -3,12 +3,14 @@
 | 项目 | 内容 |
 | --- | --- |
 | 状态 | Draft（含当前实现记录） |
-| 版本 | v0.3 |
+| 版本 | v0.4 |
 | 日期 | 2026-09-26 |
 | 范围 | 架构、当前实现边界与后续路线 |
 | 网关 | LiteLLM Proxy |
 | 安全服务 | agent-guard |
 | 语义检测模型 | Qwen3Guard（后续 L3） |
+
+> 当前 Chat 多客户端的代码实施以 [`chat-multi-client-adaptation-implementation.md`](chat-multi-client-adaptation-implementation.md) 为准；本文保留总体架构、L1/L2/L3、缓存、可观测性和生产化路线。
 
 > 当前实现记录（2026-09-26）：Chat-only 入口、LiteLLM generic guardrail、agent-guard L1 Envelope/对齐校验、Chat 流式 `incremental_diff`、安全边界下的增量扫描均已落地并通过本机 HTTP 验收。Responses、Anthropic、Gemini 不属于当前交付范围。下一阶段重点是 `/v1/chat/completions` 下的多客户端 Profile 适配，而不是新增协议。
 

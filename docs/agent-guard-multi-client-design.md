@@ -5,13 +5,15 @@
 | 状态 | Proposed（下一阶段实施规范） |
 | 版本 | v0.5 |
 | 日期 | 2026-09-26 |
-| 范围 | 方案设计，不包含代码实现 |
+| 范围 | 架构与语义设计；代码实施见配套开发文档 |
 | 核心组件 | agent-guard |
 | 固定上游 | LiteLLM Proxy `generic_guardrail_api` |
 | 关键约束 | 无法修改 LiteLLM Proxy，无法修改 Agent 客户端 |
 | 目标 | 在仅修改 agent-guard 的前提下，支持不同客户端的消息结构和安全语义 |
 | 执行优先级 | 见 [`protocol-adapter-design.md`](protocol-adapter-design.md) 第 12 章（P0–P4、R1） |
 | 对齐基准 | 协议方言与对齐层细节以 [`protocol-adapter-design.md`](protocol-adapter-design.md) 为准，见第 0 节 |
+
+> 代码实施请以 [`chat-multi-client-adaptation-implementation.md`](chat-multi-client-adaptation-implementation.md) 为执行手册。本文保留架构、语义模型和长期取舍；实施手册负责文件级任务、接口草案、夹具、测试和 Definition of Done。
 
 > 当前状态（2026-09-26）：Chat-only 的 P0/P1 已完成。D0/D1 的 Envelope、稳定 item、对齐校验和 LiteLLM 动作兼容已经落地；下一阶段集中实施同一 `/v1/chat/completions` 下的多客户端 Profile。Responses Profile 仍属后续适配；D2–D6 是后续路线，不代表全部已实现。
 

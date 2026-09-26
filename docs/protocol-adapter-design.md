@@ -9,6 +9,8 @@
 | 固定上游 | LiteLLM Proxy `generic_guardrail_api` |
 | 关键约束 | 不修改 LiteLLM 代码，修复集中在 agent-guard |
 
+> Chat 多客户端的代码任务不在本文展开，统一见 [`chat-multi-client-adaptation-implementation.md`](chat-multi-client-adaptation-implementation.md)。本文只定义协议边界、Envelope 不变式和 Chat/Responses 的范围决策。
+
 > 本期范围决策（2026-09-26）：**只对客户端 `/v1/chat/completions` 作 P0/P1 安全验收和承诺；`/v1/responses` 后续适配，不作为本期交付条件。** 已有 Responses 代码和测试是预研，不等于完整支持。本期提供 `liteLLM/serve_chat_only.py` 作为路由隔离入口；`config.yaml` 本身不封禁 Responses，直接暴露 LiteLLM 后端不属于本期安全部署。下文 F6 与 Responses 适配规则保留作为后续设计，旧版“OpenAI 家族均属 P0”的措辞以本决策及第 12–14 章更新为准。
 
 > 实施记录（2026-09-26）：Chat-only 的 P0/P1 已完成验收。A0/A1 的 Chat Envelope、对齐校验、结构化工具字段补扫，以及 S1/S2 的流式脱敏、holdback、路由隔离和保守增量扫描均已实现并通过真实 HTTP 测试。下一阶段不扩展协议范围，而是补齐 `/v1/chat/completions` 下的多客户端 Profile；Responses 只有工具项时的 LiteLLM 绕过仍作为后续协议适配缺口。
