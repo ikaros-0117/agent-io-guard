@@ -16,7 +16,7 @@ from .detector import (
     StaticRuleDetector,
     TextItem,
 )
-from .envelope import SecurityEnvelope, build_input_envelope
+from .envelope import ChatEnvelopeBuilder, SecurityEnvelope
 from .models import (
     DetectorVersionsResponse,
     FindingResponse,
@@ -27,6 +27,7 @@ from .models import (
     SanitizedItemResponse,
 )
 from .output_stream import OutputStreamScanner
+from .profiles import CapabilityResolver
 from .rules import STATIC_RULES, RuleAction
 
 logger = logging.getLogger("agent_guard")
@@ -186,7 +187,7 @@ def _litellm_response(
         source_index = _text_source_index(finding.source)
         if finding.action == RuleAction.HARD_BLOCK:
             item = sources.get(finding.source)
-            if (envelope is not None and envelope.alignment == "aligned"
+            if (envelope is not None and envelope.allows_history_exemption
                 and item is not None and item.scope == "history"
                 and item.content_type == "text" and source_index is not None):
                 historical_hard_indices.add(source_index)
@@ -380,6 +381,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     settings = settings or Settings.from_env()
     detector = StaticRuleDetector(settings)
     stream_scanner = OutputStreamScanner(detector)
+    capability_resolver = CapabilityResolver()
+    envelope_builder = ChatEnvelopeBuilder()
     app = FastAPI(
         title="agent-guard",
         version="0.1.0",
@@ -429,10 +432,11 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         request: Request,
     ) -> LiteLLMGuardrailResponse:
         _authorize(request, settings)
-        envelope = (
-            build_input_envelope(payload.texts, payload.structured_messages, payload.tool_calls)
-            if payload.input_type == "request" else None
-        )
+        capabilities = None
+        envelope = None
+        if payload.input_type == "request":
+            capabilities = capability_resolver.resolve(payload)
+            envelope = envelope_builder.build(payload, capabilities)
         items = envelope.scan_items if envelope is not None else _litellm_items(payload)
         scanned = None
         try:
@@ -463,8 +467,11 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 ) if scanned.sanitized_texts != tuple(payload.texts or ())
                 else LiteLLMGuardrailResponse(action="NONE")
             )
-        if (envelope is not None and envelope.alignment == "degraded"
-            and settings.alignment_mode == "strict"):
+        if (
+            envelope is not None
+            and (envelope.alignment == "degraded" or envelope.fallback)
+            and settings.alignment_mode == "strict"
+        ):
             response = LiteLLMGuardrailResponse(
                 action="BLOCKED", blocked_reason=f"Input alignment degraded; request_id={request_id}"
             )
@@ -480,11 +487,15 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             if (item := sources.get(finding.source)) is not None
         ]
         logger.info(
-            "litellm guardrail request_id=%s input_type=%s alignment=%s adapter_version=%s reason_codes=%s audit_refs=%s incremental=%s decision=%s action=%s findings=%s latency_ms=%.3f",
+            "litellm guardrail request_id=%s input_type=%s alignment=%s adapter_id=%s adapter_version=%s fallback=%s confidence=%s capabilities=%s reason_codes=%s audit_refs=%s incremental=%s decision=%s action=%s findings=%s latency_ms=%.3f",
             request_id,
             payload.input_type,
             envelope.alignment if envelope else "not_applicable",
+            envelope.adapter_id if envelope else "not_applicable",
             envelope.adapter_version if envelope else "not_applicable",
+            envelope.fallback if envelope else False,
+            envelope.confidence if envelope else "not_applicable",
+            envelope.capability_ids if envelope else (),
             envelope.reason_codes if envelope else (),
             audit_refs,
             scanned.incremental if scanned is not None else False,
