@@ -42,6 +42,7 @@ Client -> Chat-only ingress -> LiteLLM Proxy -> agent-guard -> Memory/Redis/Qwen
 
 - P0：已增加内部来源映射、对齐校验与严格降级拦截；Chat 交付矩阵 5 项通过，Responses 的 5 项仅作为诊断基线，结构化工具参数与工具结果可在 guard **被调用时**检出。
 - P1：主配置已开启 Chat `incremental_diff`（每轮扫描），guard 返回默认 64 字符 holdback；拆分密钥、拆分 PEM 和 10 万字符长流中密钥均通过真实 HTTP Proxy SSE 端到端验证。输出累积扫描上限独立配置，超限返回策略拦截而非 413。
+- P2/M6：Generic Chat、`folded_runtime_context`、`tool_chain` 已接入真实 Chat-only 请求链；现有 generic/dsh 共 16 个 fixture 通过真实 ingress 矩阵，包含 action、Capability、alignment、上游消息、调用次数和 SSE 断言。OpenCode、Claude Code、Codex Chat 仍缺少真实脱敏夹具。
 - 路由隔离：新增精确路径白名单入口（Chat + 模型列表），LiteLLM 后端仅监听回环地址；真实进程测试证明 Responses/未知路由被拒、Chat/SSE 正常。增量扫描按调用 ID 缓存累计文本，在可证明安全的逗号边界只扫新增部分；对 PEM、编码、Unicode、缺失调用 ID 等不确定情况自动回退全量扫描，并保留原输出上限。
 - **仍需注意**：该隔离依赖只对外暴露入口端口，不能直接暴露私有 LiteLLM 端口。Responses 纯工具项绕过问题作为后续适配缺口保留。当前 Chat 多客户端能力还没有全部落地，下一阶段要先完成夹具可识别性审计，再实现 Generic fallback、Capability Resolver 和少量特殊语义 Adapter。详见 [多客户端设计](docs/agent-guard-multi-client-design.md)、[网关说明](liteLLM/README.md) 和 [工具验证说明](tools/README.md)。
 

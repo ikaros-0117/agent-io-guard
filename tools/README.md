@@ -71,9 +71,24 @@ agent-guard/.venv/bin/python tools/verify_chat_only_e2e.py
 
 本机启动入口、回环绑定的 LiteLLM、guard 和 mock 模型：确认 `/v1/responses` 等未知路由 404 且上游无调用，Chat 正常/攻击判决正确、SSE 脱敏正确，10 万字符逗号分隔长流中实际记录 `incremental=True`。这是本期 P0/P1 的主验收路径。后端回环端口不能直接对外开放。
 
-下一阶段会在这条测试链路上增加“Capability/语义矩阵”：同一安全场景分别用 DSH、OpenCode、Claude Code 等真实或脱敏后的 Chat 请求夹具重放，比较 guard 判决、Capability 结果和上游实际看到的内容。协议矩阵解决“字段是否漏扫”，能力矩阵解决“同一 `/v1/chat/completions` 下不同客户端的消息组装语义是否被正确解释”。
+M6 已在这条测试链路上增加“Capability/语义矩阵”：用当前脱敏 Chat 夹具重放，
+比较 guard 判决、Capability、alignment、调用次数和上游实际看到的内容。协议矩阵
+解决“字段是否漏扫”，能力矩阵解决“同一 `/v1/chat/completions` 下消息组装语义是否
+被正确解释”。
 
-## Chat 客户端夹具（M0）
+## Chat 客户端能力矩阵（M6）
+
+```bash
+agent-guard/.venv/bin/python tools/verify_chat_client_matrix.py
+```
+
+该脚本启动真实 mock 上游、agent-guard 和 Chat-only ingress，逐个回放
+`tools/fixtures/chat_clients/` 下的全部 fixture。输入场景断言 HTTP action、
+Capability、alignment、上游调用次数和上游消息；流式场景使用真实 SSE 客户端断言，
+确认客户端只收到脱敏内容。末尾汇总按 fixture/profile/capability/action/alignment
+输出，且不包含原始 secret、私钥或 PII。
+
+## Chat 客户端夹具（M0/M0.1/M5）
 
 ```bash
 agent-guard/.venv/bin/python -m pytest agent-guard/tests/test_chat_client_fixture_contract.py -q
@@ -102,7 +117,7 @@ agent-guard/.venv/bin/python tools/verify_stream_guard_e2e.py
 
 Responses 为后续适配，当前有一项明确的 LiteLLM 边界缺口：请求若只有 `function_call_output` 且无可提取文本，翻译层直接返回，guard 调用为 0 次；脚本以 `[KNOWN GAP]` 明示。接入层在解决该缺口前不得允许这类纯工具项请求绕过扫描。
 
-当前协议矩阵状态（Chat 列为本期范围；Responses 列仅为后续诊断）。下一阶段另建 Capability/语义矩阵；未知 synthetic 前缀与 span 回写仍是后续任务：
+当前协议矩阵状态（Chat 列为本期范围；Responses 列仅为后续诊断）。Capability/语义矩阵见上方 M6 脚本；未知 synthetic 前缀与 span 回写仍是后续任务：
 
 | 场景 | OpenAI Chat（本期） | OpenAI Responses（后续） |
 | --- | --- | --- |

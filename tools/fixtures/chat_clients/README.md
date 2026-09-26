@@ -1,6 +1,6 @@
 # Chat client fixtures
 
-本目录是 `/v1/chat/completions` 多客户端适配的 M0/M0.1/M5 夹具基线。它冻结
+本目录是 `/v1/chat/completions` 多客户端适配的 M0/M0.1/M5/M6 夹具基线。它冻结
 LiteLLM generic guardrail 入参形状、可识别性审计结果和 Capability 期望，不代替
 Profile Resolver 或规则实现。
 
@@ -101,9 +101,11 @@ agent-guard/.venv/bin/python -m pytest \
 
 ## 当前边界
 
-这些夹具只定义“后续 Profile/Envelope 实现需要满足的契约”。本轮没有实现：
+这些夹具定义已经由 `tools/verify_chat_client_matrix.py` 通过真实 Chat-only ingress
+回放，包含 action、Capability、alignment、上游消息、调用次数和流式 SSE 断言。
+当前仍未覆盖：
 
-- fixture 回放、真实上游矩阵和 SSE 客户端断言；
+- OpenCode、Claude Code、Codex Chat 等尚无脱敏真实夹具的客户端；
 - `/v1/responses` 或其他协议。
 
 因此，`dsh_chat` fixture 通过只表示结构和审计期望已冻结，不表示 DSH Profile
