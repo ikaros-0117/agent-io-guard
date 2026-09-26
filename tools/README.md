@@ -71,8 +71,8 @@ agent-guard/.venv/bin/python tools/verify_chat_only_e2e.py
 
 本机启动入口、回环绑定的 LiteLLM、guard 和 mock 模型：确认 `/v1/responses` 等未知路由 404 且上游无调用，Chat 正常/攻击判决正确、SSE 脱敏正确，10 万字符逗号分隔长流中实际记录 `incremental=True`。这是本期 P0/P1 的主验收路径。后端回环端口不能直接对外开放。
 
-M6 已在这条测试链路上增加“Capability/语义矩阵”：用当前脱敏 Chat 夹具重放，
-比较 guard 判决、Capability、alignment、调用次数和上游实际看到的内容。协议矩阵
+M6 已在这条测试链路上增加“Capability/语义矩阵”：用当前**合成** Chat 夹具重放，
+比较 guard 判决、Capability、alignment、confidence、resolver fallback、调用次数和上游实际看到的内容。协议矩阵
 解决“字段是否漏扫”，能力矩阵解决“同一 `/v1/chat/completions` 下消息组装语义是否
 被正确解释”。
 
@@ -83,10 +83,12 @@ agent-guard/.venv/bin/python tools/verify_chat_client_matrix.py
 ```
 
 该脚本启动真实 mock 上游、agent-guard 和 Chat-only ingress，逐个回放
-`tools/fixtures/chat_clients/` 下的全部 fixture。输入场景断言 HTTP action、
-Capability、alignment、上游调用次数和上游消息；流式场景使用真实 SSE 客户端断言，
-确认客户端只收到脱敏内容。末尾汇总按 fixture/profile/capability/action/alignment
-输出，且不包含原始 secret、私钥或 PII。
+`tools/fixtures/chat_clients/` 下的全部**合成** fixture。输入场景断言 HTTP action、
+Capability、alignment、请求阶段 confidence/resolver fallback、上游调用次数和上游消息；
+流式场景使用真实 SSE 客户端断言，确认客户端只收到脱敏内容。末尾汇总含
+fixture/profile/capability/action/alignment/confidence/resolver_fallback，且不包含原始 secret、私钥或 PII。
+**真实的是网关链路，不是客户端进程。** 阶段验收及剩余证据见
+[`../docs/chat-multi-client-stage-acceptance.md`](../docs/chat-multi-client-stage-acceptance.md)。
 
 ## Chat 客户端夹具（M0/M0.1/M5）
 
@@ -94,9 +96,9 @@ Capability、alignment、上游调用次数和上游消息；流式场景使用�
 agent-guard/.venv/bin/python -m pytest agent-guard/tests/test_chat_client_fixture_contract.py -q
 ```
 
-`tools/fixtures/chat_clients/` 固化 LiteLLM generic guardrail 的真实入参投影和
-`generic_chat`、`dsh_chat` 的八类脱敏期望。`loader.py` 只做 schema、枚举和结构对齐
-校验；本轮不实现 Profile Resolver、不重放 guard、不扩大 `/v1/responses` 范围。
+`tools/fixtures/chat_clients/` 固化参照 LiteLLM generic guardrail 字段构造的
+`generic_chat`、`dsh_chat` 各八类**合成**脱敏夹具。`loader.py` 只做 schema、枚举和结构对齐
+校验；Resolver 已实现，M6 脚本已重放这些夹具；`/v1/responses` 仍未开放。
 
 ## 协议矩阵与流式回归（进程内）
 
@@ -136,6 +138,6 @@ Anthropic 列仅作预留登记，Gemini 不在矩阵内。设计见 `docs/proto
 - **超长输入被硬拒**：单条 > `AGENT_GUARD_MAX_TEXT_CHARS` 时 agent-guard 返回 413，LiteLLM 因 `fail_on_error` + `unreachable_fallback: fail_closed` 直接让请求失败。想放行长文本必须调大上限或改降级策略。
 - **fail_closed 的代价是可用性**：agent-guard 挂掉时全部请求失败，实测返回 500（不是 400，因为没有策略判决）。
 - **system/developer 受信**：内容不扫描、不改写、返回 `NONE`；如需处理客户端伪造的受信角色，必须在接入鉴权层约束。
-- **多客户端尚未全部闭环**：当前通用 Chat 路径已通过 P0/P1 验收，但仍需完成夹具可识别性审计、Generic fallback、Capability Resolver 和少量特殊语义 Adapter；不能把一个客户端或一个 Capability 的通过结果自动扩展到所有 Chat 客户端。
+- **真实客户端尚未全部认证**：M0.1 可识别性审计、Generic fallback、Capability Resolver、折叠上下文与工具链能力均已实现；合成夹具通过不代表 DSH/OpenCode/Claude Code 等真实客户端版本通过。需先采集脱敏真实请求，再逐客户端回放和验收。
 - **输出长流**：10 万字符与增量扫描已在真实 Chat-only 网关验证；仅安全逗号边界复用已扫描前缀，PEM、编码/Unicode、缺少调用 ID 等退回全量扫描。超过输出上限策略拦截，不承诺无限长流或所有内容都线性开销。
 - **脱敏会顺带做 NFKC 归一化**：`key：` 会变成 `key:`，见 `agent-guard/agent_guard/normalization.py` 的 `redaction_view`。

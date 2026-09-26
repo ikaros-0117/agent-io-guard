@@ -38,6 +38,8 @@ class MatrixRow:
     capability: str
     action: str
     alignment: str
+    confidence: str
+    resolver_fallback: bool
     upstream_calls: int
 
 
@@ -48,6 +50,7 @@ class GuardAudit:
     action: str
     capabilities: tuple[str, ...]
     fallback: bool
+    confidence: str
     incremental: bool
 
 
@@ -66,9 +69,10 @@ def _parse_guard_audit(line: str) -> GuardAudit:
     alignment = re.search(r" alignment=(\S+)", line)
     action = re.search(r" action=(NONE|BLOCKED|GUARDRAIL_INTERVENED)", line)
     fallback = re.search(r" fallback=(True|False)", line)
+    confidence = re.search(r" confidence=(high|medium|low|not_applicable)", line)
     incremental = re.search(r" incremental=(True|False)", line)
     capabilities = re.search(r" capabilities=\(([^)]*)\) reason_codes=", line)
-    if not all((adapter, alignment, action, fallback, incremental, capabilities)):
+    if not all((adapter, alignment, action, fallback, confidence, incremental, capabilities)):
         raise AssertionError("agent-guard audit log fields are incomplete")
     capability_ids = tuple(re.findall(r"'([^']+)'", capabilities.group(1)))
     return GuardAudit(
@@ -77,6 +81,7 @@ def _parse_guard_audit(line: str) -> GuardAudit:
         action=action.group(1),
         capabilities=capability_ids,
         fallback=fallback.group(1) == "True",
+        confidence=confidence.group(1),
         incremental=incremental.group(1) == "True",
     )
 
@@ -153,6 +158,15 @@ class ChatClientMatrix:
                 )
             )
             return
+        # These well-formed synthetic Chat projections resolve Generic with high
+        # confidence. `fallback_required` in the fixture means *client identity*
+        # cannot be distinguished; it is not CapabilitySet.fallback, which means
+        # the generic protocol adapter itself failed to match.
+        if audit.fallback or audit.confidence != "high":
+            self.failures.append(
+                (fixture.fixture_id, f"resolver fallback/confidence: {audit.fallback}/{audit.confidence}")
+            )
+            return
 
         if fixture.expected_action != "BLOCKED":
             actual_messages = _normalized_messages(
@@ -175,6 +189,8 @@ class ChatClientMatrix:
                 capability=",".join(audit.capabilities) or "-",
                 action=audit.action,
                 alignment=audit.alignment,
+                confidence=audit.confidence,
+                resolver_fallback=audit.fallback,
                 upstream_calls=calls,
             )
         )
@@ -246,6 +262,11 @@ class ChatClientMatrix:
                 )
             )
             return
+        if request_audit.fallback or request_audit.confidence != "high":
+            self.failures.append(
+                (fixture.fixture_id, f"resolver fallback/confidence: {request_audit.fallback}/{request_audit.confidence}")
+            )
+            return
         actual_messages = _normalized_messages(
             self.harness.upstream_seen().get("messages")
         )
@@ -262,6 +283,8 @@ class ChatClientMatrix:
                 capability=",".join(request_audit.capabilities) or "-",
                 action=response_audit.action,
                 alignment=request_audit.alignment,
+                confidence=request_audit.confidence,
+                resolver_fallback=request_audit.fallback,
                 upstream_calls=calls,
             )
         )
@@ -360,8 +383,8 @@ class ChatClientMatrix:
 
     def _render_summary(self) -> str:
         lines = [
-            "fixture_id | profile | capability | action | alignment | upstream_calls",
-            "--- | --- | --- | --- | --- | ---",
+            "fixture_id | profile | capability | action | alignment | confidence | resolver_fallback | upstream_calls",
+            "--- | --- | --- | --- | --- | --- | --- | ---",
         ]
         lines.extend(
             " | ".join(
@@ -371,6 +394,8 @@ class ChatClientMatrix:
                     row.capability,
                     row.action,
                     row.alignment,
+                    row.confidence,
+                    str(row.resolver_fallback),
                     str(row.upstream_calls),
                 )
             )

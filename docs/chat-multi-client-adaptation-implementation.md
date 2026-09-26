@@ -2,8 +2,8 @@
 
 | 项目 | 内容 |
 | --- | --- |
-| 状态 | Ready for implementation |
-| 版本 | v0.2 |
+| 状态 | M0.1–M6 已实现合成夹具范围；真实客户端认证待完成 |
+| 版本 | v0.3 |
 | 日期 | 2026-09-26 |
 | 适用路由 | `/v1/chat/completions` |
 | 负责模块 | `agent-guard/`、`tools/` |
@@ -11,6 +11,8 @@
 | 核心路线 | Generic Chat + Capability Detection + Canonical Envelope + strict fallback |
 
 > 本文是代码实施手册。它取代“每个客户端一个完整 Profile”的旧路线。Client Profile 只作为能力组合和观测标签；只有出现新的消息语义时，才新增 Capability Adapter。
+
+> **实施结果与 DoD 逐项判定**见 [`chat-multi-client-stage-acceptance.md`](chat-multi-client-stage-acceptance.md)。下面的 M 任务记录原定开发步骤；任务代码完成不等于真实 DSH/OpenCode/Claude Code 等客户端已获认证。
 
 ## 1. 目标
 
@@ -40,7 +42,8 @@ Chat-only ingress
 普通客户端 -> Generic Chat
 相同语义差异 -> 复用已有 Capability
 新消息语义 -> 新增最小 Capability Adapter
-无法判断 -> Generic + low confidence + strict
+客户端身份未知、但标准 Chat 结构可识别 -> Generic Chat；不推断客户端专属能力
+连 Chat 结构/能力也无法可靠解释 -> fallback=true + low confidence + strict
 ```
 
 ## 2. 当前代码基线
@@ -49,14 +52,14 @@ Chat-only ingress
 
 | 文件 | 当前职责 | 本阶段方向 |
 | --- | --- | --- |
-| `agent-guard/agent_guard/api.py` | HTTP 入口、鉴权、动作映射 | 接入 Capability Resolver/Envelope Builder；保持 LiteLLM HTTP 契约 |
-| `agent-guard/agent_guard/envelope.py` | texts/structured/tool_calls 转安全 item | 拆分通用 Chat 解析与 Capability 语义 |
+| `agent-guard/agent_guard/api.py` | HTTP 入口、鉴权、Capability Resolver/Envelope Builder、动作映射 | 维持 LiteLLM HTTP 契约，扩充真实客户端和负向回归 |
+| `agent-guard/agent_guard/envelope.py` | texts/structured/tool_calls → Capability 驱动的 Canonical Items | 只为有证据的新语义扩展 |
 | `agent-guard/agent_guard/detector.py` | L1 规则和限制 | 不写客户端特例，只消费 Canonical Items |
 | `agent-guard/agent_guard/output_stream.py` | Chat 输出增量扫描 | 保持客户端无关，补充矩阵回归 |
-| `tools/fixtures/chat_clients/` | M0 脱敏 fixture | 先审计可识别性，再扩展能力字段 |
-| `tools/verify_chat_only_e2e.py` | Chat-only 真实进程验收 | 后续接入 fixture 回放矩阵 |
+| `tools/fixtures/chat_clients/` | M0/M0.1 的 Generic/DSH-like 合成 fixture 和可识别性审计 | 用真实客户端脱敏样本校验并扩展能力字段 |
+| `tools/verify_chat_client_matrix.py` | M6 合成夹具真实 Chat-only 进程回放 | 增加真实客户端和负向 fallback/degraded 场景 |
 
-当前 `envelope.py` 的 `SYNTHETIC_USER_PREFIXES` 是临时兼容逻辑。本阶段不要继续向通用元组追加客户端特例，最终应迁移到 `folded_runtime_context` Capability。
+原 `envelope.py` 的 `SYNTHETIC_USER_PREFIXES` 已迁移到 `folded_runtime_context` Capability。不要再往通用 Envelope 中加入客户端专属前缀。
 
 ## 3. 目标代码结构
 
@@ -67,9 +70,9 @@ agent-guard/agent_guard/
     base.py                  # Capability 协议和注册接口
     models.py                # CapabilityMatch、CapabilitySet、TurnBoundary
     folded_runtime_context.py
-    partial_history.py
+    partial_history.py         # 仅获得可靠历史完整性信号后实现
     tool_chain.py
-    rag_context.py
+    rag_context.py             # 仅获得可靠来源信号后实现
 
   profiles/
     __init__.py
@@ -134,7 +137,7 @@ class CapabilitySet:
 DSH-like folded context:
   capabilities=[folded_runtime_context, tool_chain]
 
-无法识别:
+Chat 结构也无法识别:
   fallback=true, capabilities=[], confidence=low
 ```
 
@@ -246,7 +249,8 @@ class CapabilityResolver:
 - Resolver 不改写文本；
 - Resolver 不输出原文日志；
 - 多个 Capability 冲突时选择更保守结果；
-- 无法判断时 `fallback=true`、`confidence=low`；
+- 客户端身份未知但标准 Chat 结构可解释时，仍可得到 `generic_chat`、`fallback=false`、高协议结构置信度；这**不是**已验证客户端身份或历史完整性；
+- Chat 结构不可识别、能力冲突或低置信度时才 `fallback=true`、`confidence=low`、strict；
 - `client_id` 只作为观测标签，不能改变 trust。
 
 ## 7. Envelope 构建流程
@@ -287,17 +291,17 @@ class ChatEnvelopeBuilder:
 
 ## 8. M0.1：夹具可识别性审计
 
-当前 M0 已有 generic/dsh 两组 fixture 和 42 项契约测试，但大部分同场景请求完全相同。M1 前必须完成审计：
+**已完成。** M0 建立 generic/dsh 两组各 8 个合成 fixture；M0.1 发现多数同场景请求无法区分客户端身份，只有特定消息形状可提取 Capability。原验收步骤如下：
 
 1. 比较每个同场景 fixture 的 `texts`、structured、tool_calls、headers、metadata、role 序列；
 2. 输出真正存在的差异字段；
 3. 对无法区分的场景，不伪造 header，不强制 `dsh_chat` 识别；
-4. 增加 `match_expectation=fallback_required` 或将 `profile_expected` 改为 `generic_chat`；
+4. 将无法区分 DSH 身份的 `profile_expected` 改为 `generic_chat`，并用 `match_expectation=fallback_required` 记录**客户端身份层面**的回退；它不等于 `CapabilitySet.fallback=True`；
 5. 对 `system_runtime_context` 单独标记 `folded_runtime_context` 能力；
 6. stream response fixture 不重新识别客户端，标记“profile inherited from request”；
 7. 通过审计测试后再进入 M1。
 
-M0.1 交付物：
+M0.1 已交付：
 
 ```text
 tools/fixtures/chat_clients/README.md
@@ -305,56 +309,56 @@ agent-guard/tests/test_chat_client_fixture_contract.py
 agent-guard/tests/test_fixture_matchability.py
 ```
 
-## 9. 代码任务拆分
+## 9. 代码任务拆分（历史执行清单）
 
 ### M1：Capability 领域模型
 
-- [ ] 新建 `capabilities/models.py`、`capabilities/base.py`；
-- [ ] 定义 `CapabilityMatch`、`CapabilitySet`、`TurnBoundary`；
-- [ ] 给 `SecurityItem` 增加 capability/origin/authority/trust/mutable/confidence 字段；
-- [ ] 保持现有 detector 和 LiteLLM HTTP 契约；
-- [ ] 增加模型和序列化单测。
+- [x] 新建 `capabilities/models.py`、`capabilities/base.py`；
+- [x] 定义 `CapabilityMatch`、`CapabilitySet`、`TurnBoundary`；
+- [x] 给 `SecurityItem` 增加 capability/origin/authority/trust/mutable/confidence 字段；
+- [x] 保持现有 detector 和 LiteLLM HTTP 契约；
+- [x] 增加模型和序列化单测。
 
 ### M2：Generic Chat + fallback Resolver
 
-- [ ] 新建 `profiles/generic_chat.py`、`profiles/resolver.py`；
-- [ ] Resolver 无法识别时稳定返回 Generic + `fallback=true`；
-- [ ] 明确 low confidence 不享受历史豁免；
-- [ ] 增加 resolver 冲突、fallback、无原文日志测试；
-- [ ] 暂不实现 DSH 专属逻辑。
+- [x] 新建 `profiles/generic_chat.py`、`profiles/resolver.py`；
+- [x] **Generic Chat 结构也无法识别时**返回 `CapabilitySet.fallback=true`；可识别的标准 Chat 仍为 `fallback=false`；
+- [x] 明确 low confidence 不享受历史豁免；
+- [x] 增加 resolver 冲突、fallback 等单测；
+- [x] 不实现按客户端名称分流的 DSH 专属 Profile。
 
 ### M3：`folded_runtime_context` Capability
 
-- [ ] 新建 `capabilities/folded_runtime_context.py`；
-- [ ] 将通用 `SYNTHETIC_USER_PREFIXES` 迁移为能力规则；
-- [ ] 实现 last non-synthetic user；
-- [ ] unknown prefix 按低置信度处理；
-- [ ] 验证历史攻击 neutralization 不影响当前正常输入；
-- [ ] 不把任意 `role=user` 标记为 trusted。
+- [x] 新建 `capabilities/folded_runtime_context.py`；
+- [x] 将通用 `SYNTHETIC_USER_PREFIXES` 迁移为能力规则；
+- [x] 实现 last non-synthetic user；
+- [x] unknown prefix 按低置信度处理；
+- [x] 验证历史攻击 neutralization 不影响当前正常输入；
+- [x] 不把任意 `role=user` 标记为 trusted。
 
 ### M4：Capability 驱动 Envelope
 
-- [ ] 新建 `ChatEnvelopeBuilder`；
-- [ ] 将 api request 分支改为 Resolver -> Builder -> Validator -> Detector；
-- [ ] 保留 `NONE`、`BLOCKED`、`GUARDRAIL_INTERVENED` 契约；
-- [ ] 保留 `item_id`、`origin_ref`、`adapter_version` 审计字段；
-- [ ] 补充 capability、confidence、degraded 回归。
+- [x] 新建 `ChatEnvelopeBuilder`；
+- [x] 将 api request 分支改为 Resolver -> Builder -> Validator -> Detector；
+- [x] 保留 `NONE`、`BLOCKED`、`GUARDRAIL_INTERVENED` 契约；
+- [x] 保留 `item_id`、`origin_ref`、`adapter_version` 审计元数据；完整持久审计事件仍待设计；
+- [x] 补充 capability、confidence、degraded 单元回归。
 
 ### M5：通用能力扩展
 
-- [ ] 根据真实 fixture 决定是否实现 `tool_chain`、`partial_history`、`rag_context`；
-- [ ] 已有通用工具链逻辑优先抽为 Capability，不创建客户端专属副本；
-- [ ] 只有新语义无法由已有 Capability 表达时才新增 Adapter；
-- [ ] OpenCode/Claude Code/Codex Chat 若无稳定差异，复用 Generic，不创建空 Profile。
+- [x] 基于现有**合成 fixture** 实现 `tool_chain`；`partial_history`、`rag_context` 缺可靠来源证据，明确暂缓，而非声称已覆盖；
+- [x] 已有通用工具链逻辑抽为 Capability，不创建客户端专属副本；
+- [x] 当前未发现可验证的新语义，不新增客户端专属 Adapter；
+- [ ] OpenCode/Claude Code/Codex Chat 尚无真实脱敏请求，需取得证据后才能决定是否复用 Generic。
 
 ### M6：客户端矩阵和真实网关验收
 
-- [ ] 新建 `tools/verify_chat_client_matrix.py`；
-- [ ] 每个 fixture 通过真实 Chat-only ingress；
-- [ ] 断言 action、上游消息、alignment、capability 和调用次数；
-- [ ] 流式场景断言真实 SSE 客户端内容；
-- [ ] 输出不得包含原始 secret/private key/PII；
-- [ ] 生成按 capability/profile/fixture/action/alignment 的汇总。
+- [x] 新建 `tools/verify_chat_client_matrix.py`；
+- [x] 16 个**合成** fixture 通过真实 Chat-only ingress；
+- [x] 断言 action、上游消息、alignment、capability、请求阶段 confidence/resolver fallback 和调用次数；
+- [x] 流式场景断言真实 SSE 客户端内容；
+- [x] 汇总不包含原始 secret/private key/PII；
+- [x] 生成按 capability/profile/fixture/action/alignment/confidence/fallback 的汇总。
 
 ## 10. 测试要求
 
@@ -402,7 +406,7 @@ agent-guard/tests/test_fixture_matchability.py
 
 ## 11. Definition of Done
 
-多客户端 Chat 阶段完成必须同时满足：
+多客户端 Chat **正式完成**仍须同时满足下列全部条件。当前逐项状态见 [阶段验收记录](chat-multi-client-stage-acceptance.md)；M6 合成夹具通过不等于本节 DoD 全部完成：
 
 1. 目标客户端清单和实际路由已冻结；
 2. 每个客户端都有脱敏 fixture，或明确记录复用 Generic；

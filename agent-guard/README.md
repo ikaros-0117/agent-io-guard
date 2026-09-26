@@ -6,7 +6,7 @@
 
 本期安全验收仅针对客户端 `/v1/chat/completions`。`/v1/responses` 尚未完成适配验收；即使 guard 能处理其中部分字段，也不能承诺该路由已受保护。请用 `liteLLM/serve_chat_only.py` 启动项目提供的精确路由白名单入口，不要直接对外暴露 LiteLLM 本体；仅 `config.yaml` 不提供路由隔离。
 
-P0/P1 已解决“Chat 请求能不能被安全检查”的基础问题；下一阶段要解决“不同 Chat 客户端发来的内容如何正确解释”的问题。当前代码已有通用 Chat Envelope 和少量 synthetic context 兼容逻辑，但还没有完成 DSH、OpenCode、Claude Code 等客户端的独立 Profile 与完整回归。
+P0/P1 已解决 Chat 通用链路的基础问题。当前 Generic Chat Resolver、Capability 驱动 Envelope、`folded_runtime_context` 和 `tool_chain` 已实现，16 个合成夹具通过真实 Chat-only 网关矩阵。**这不是 DSH、OpenCode、Claude Code 等真实客户端版本的认证**；下一步是取证与逐客户端回归。阶段状态见 [`../docs/chat-multi-client-stage-acceptance.md`](../docs/chat-multi-client-stage-acceptance.md)。
 
 ## 当前能力
 
@@ -72,7 +72,7 @@ Content-Type: application/json
 
 - 最新一条真实用户消息命中硬拦截时，返回 `BLOCKED`；`system`/`developer` 内容按已定信任策略跳过扫描。
 - 仅历史消息命中硬拦截时，返回 `GUARDRAIL_INTERVENED`，将历史攻击文本替换为 `[REMOVED_BY_AGENT_GUARD]`，避免正常的新一轮输入被反复阻止，同时防止旧攻击继续进入模型上下文。
-- 已知 DSH/pi-ai 风格的部分 system runtime-context 会折叠为 `role=user`；当前保留了有限的 synthetic 前缀兼容逻辑。下一阶段会把这类逻辑移入可版本化的客户端 Profile，不再继续扩大通用前缀白名单。
+- 已知 DSH/pi-ai 风格的部分 runtime context 会折叠为 `role=user`；已知前缀识别已迁入版本化的 `folded_runtime_context` Capability，不再继续扩大全局前缀白名单。该识别只证明消息形状，不证明客户端身份或可信来源。
 - 如果没有 `structured_messages`，默认严格模式下即使文本本身正常也拒绝，避免无法对齐时静默放行；显式设置 `AGENT_GUARD_ALIGNMENT=degraded_allowed` 才允许全量扫描的降级模式，且不给历史豁免。
 - 当结构化消息与扁平文本不匹配时，默认严格模式直接 `BLOCKED`；纯 `texts` 输入仍可全量扫描，但不享受历史豁免。
 - 本期验收 Chat 的结构化 `tool_calls` 和 `role=tool`。Responses 的 `function_call_output` 虽在 guard 被调用时可被检查，但纯工具项无文本请求可能在 LiteLLM 翻译层跳过 guard，属于后续适配。
@@ -119,9 +119,9 @@ curl http://127.0.0.1:8001/v1/guard/check \
 | `AGENT_GUARD_MAX_OUTPUT_TEXT_CHARS` | `1000000` | 输出侧单项累积扫描上限，超过时返回策略拦截而非 413 |
 | `AGENT_GUARD_MAX_OUTPUT_TOTAL_CHARS` | `2000000` | 输出侧总上限 |
 
-## 下一阶段：Chat 多客户端适配
+## 下一阶段：真实 Chat 客户端认证
 
-目标是让所有纳入范围的客户端都通过同一个 `/v1/chat/completions` Chat-only 入口，并在 guard 内得到稳定、可审计的语义解释。每个客户端至少需要一组真实夹具和以下断言：
+M0.1–M6 的能力模型和合成夹具链路已落地；下一步是确认目标客户端的实际版本与路由，取得脱敏真实请求，并通过同一个 `/v1/chat/completions` Chat-only 入口回归。每个纳入支持清单的客户端至少需要以下断言：
 
 - 当前轮提示注入一定 `BLOCKED`；
 - 历史攻击不会反复阻断正常新输入；
@@ -130,7 +130,7 @@ curl http://127.0.0.1:8001/v1/guard/check \
 - 密钥和 PII 在非流式、流式响应中均不泄漏；
 - 对齐失败时按 strict 策略拒绝，不静默放行。
 
-建议首批 Profile：`generic_chat`、`dsh_chat`、`opencode_chat`、`claude_code_chat`；若 Codex 等客户端实际配置为 Chat，也增加对应 Profile。Profile 识别必须以实际请求结构/header 为依据。
+Generic Chat、`folded_runtime_context` 和 `tool_chain` 可复用；**不要预先创建 `dsh_chat`、`opencode_chat`、`claude_code_chat` 全套 Profile**。若客户端实际走 Responses 或原生协议，先排除出本期；只有证据表明出现无法由现有能力解释的新消息语义，才新增最小适配。负向 fallback/degraded E2E 和完整审计事件也仍待补齐。
 
 ## 测试
 

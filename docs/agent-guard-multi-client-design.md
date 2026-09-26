@@ -12,6 +12,8 @@
 
 > 代码实施手册：[`chat-multi-client-adaptation-implementation.md`](chat-multi-client-adaptation-implementation.md)。本文件说明为什么采用 Capability 路线、Canonical Envelope 如何表达语义，以及本阶段的安全边界。
 
+> **阶段状态**：M0/M0.1–M6 已完成合成夹具范围的代码与真实网关回放；真实客户端版本、实际路由和请求尚未逐一认证，不能称为完整多客户端闭环。逐项验收与未完成项见 [`chat-multi-client-stage-acceptance.md`](chat-multi-client-stage-acceptance.md)。
+
 ## 1. 当前状态与核心结论
 
 Chat Completions 的 P0/P1 已完成：
@@ -23,7 +25,7 @@ Chat Completions 的 P0/P1 已完成：
 - Chat 流式脱敏、holdback、长流保守增量扫描；
 - strict/fail-closed 降级。
 
-当前新增的 M0 夹具也已完成结构契约测试，但它暴露出一个事实：generic Chat 和 DSH 的大部分 LiteLLM 入参完全相同，当前可见字段并不能可靠识别客户端名称。
+M0/M0.1 的合成夹具完成结构契约及可识别性审计，M1–M6 已实现 Generic Chat、折叠上下文与工具链能力和真实网关回放。夹具暴露出一个事实：generic Chat 和 DSH-like 的大部分入参完全相同，当前可见字段并不能可靠识别客户端名称。链路真实不等于客户端样本真实。
 
 因此，本阶段不采用以下路线：
 
@@ -50,7 +52,7 @@ Chat Protocol Adapter
 2. **Profile 不是客户端清单，而是能力组合。** Profile 只负责把请求映射为能力集合；安全策略不依赖客户端名称。
 3. **只有出现新语义，才新增 Capability Adapter。** 例如折叠 runtime context、部分历史、RAG 混入 user、工具链缺失配对。
 4. **客户端身份不是信任边界。** `client_id` 只能用于观测、匹配和配置；不能因为“识别为可信客户端”就放宽扫描。
-5. **无法判断时 Generic + strict/fail-closed。** 不因识别失败静默放行，也不因不确定而扩大信任范围。
+5. **区分客户端身份未知与语义不可解释。** 标准 Chat 即使不知道客户端名称，也可复用 Generic；若 Chat 结构/能力本身低置信度或错位，则 strict/fail-closed，不能扩大信任范围。
 6. **工具安全最终应下沉到工具执行边界。** Chat 层仍需检查 `tool_calls` 和 `role=tool`，但不把所有工具语义都变成客户端特例。
 
 ## 2. 三层兼容模型
@@ -286,7 +288,8 @@ Profile 不负责：
 | 仅 header 不同 | 复用 Generic，记录 client metadata |
 | 复用已有语义能力 | 复用 Capability 组合 |
 | 出现新消息语义 | 新增最小 Capability Adapter |
-| 无法判断 | Generic + low confidence + strict |
+| 客户端身份未知、标准 Chat 结构可解释 | Generic Chat；不赋予客户端专属信任 |
+| 结构或语义无法解释 | Generic + low confidence + strict |
 
 ## 7. 降级和信任边界
 
@@ -317,7 +320,7 @@ header 只能是 hint，不能直接成为 trust 来源。只有在网关侧可�
 
 ## 8. 代码实施顺序
 
-本阶段改为：
+以下是已执行的代码阶段（M5 对无证据能力的暂缓、DoD 的剩余项详见阶段验收记录）：
 
 ```text
 M0      fixture contract（当前已完成基础部分）

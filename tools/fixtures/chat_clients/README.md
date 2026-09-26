@@ -42,7 +42,7 @@ Profile Resolver 或规则实现。
 | 值 | 含义 |
 | --- | --- |
 | `expected` | `profile_expected` 是请求阶段可直接执行的基线结果。 |
-| `fallback_required` | 入参与 Generic 基线相同，缺少客户端专属可靠信号，必须回退 `generic_chat`，不得猜测客户端 Profile。 |
+| `fallback_required` | 入参与 Generic 基线相同，缺少客户端专属可靠信号，必须使用 `generic_chat`，不得猜测客户端 Profile。**这是身份层面的回退，不等于 `CapabilitySet.fallback=True`；有效 Generic Chat 请求当前为高结构置信度且该标志为 False。** |
 | `capability_required` | 仍不能据此识别客户端专属 Profile，但请求中存在可单独识别的语义 Capability。 |
 | `inherited_from_request` | 输出/流式 fixture 不重新识别客户端，沿用对应输入请求阶段的结果。 |
 

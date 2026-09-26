@@ -17,7 +17,7 @@ Client -> chat_only_gateway (:4000) -> LiteLLM Proxy (127.0.0.1:4001) -> agent-g
 `config.yaml` 包含三部分：
 
 - `model_list`：将客户端模型名映射到 LiteLLM 支持的供应商模型。
-- 顶层 `guardrails`：注册 `generic_guardrail_api`，在 `pre_call` 和 `post_call` 阶段调用 agent-guard；客户端差异由 agent-guard 内部 Profile 解释，不在入口层按客户端名称分流。
+- 顶层 `guardrails`：注册 `generic_guardrail_api`，在 `pre_call` 和 `post_call` 阶段调用 agent-guard；消息差异由 agent-guard 的 Generic Chat + Capability 解释，不在入口层按客户端名称分流。
 - `general_settings.master_key`：设置客户端访问 LiteLLM Proxy 时使用的 Bearer Key。
 
 当前配置会把以下请求头转发给 agent-guard：
@@ -113,13 +113,13 @@ Content-Type: application/json
 
 ## 下一阶段：Chat 多客户端闭环
 
-网关层继续保持单一 Chat-only 入口，不为 DSH、OpenCode、Claude Code 等客户端增加多套网关。它们只要调用 `/v1/chat/completions`，都进入同一 LiteLLM/agent-guard 链路；差异由 guard 根据实际请求结构、`structured_messages`、header 和 Profile Registry 处理。
+网关层继续保持单一 Chat-only 入口，不为 DSH、OpenCode、Claude Code 等客户端增加多套网关。它们**只有实际调用** `/v1/chat/completions` 才进入本期链路；差异由 guard 的 Generic Chat + Capability Resolver 处理。现有合成夹具已通过真实网关回放，目标客户端的实际请求/路由仍需逐个取证。
 
 下一阶段的网关侧工作主要是：
 
 - 为每个目标客户端保存真实请求夹具；
 - 记录客户端实际是否发送完整历史、工具消息和 runtime context；
-- 把客户端矩阵接入 `tools/verify_chat_only_e2e.py` 或新增 Profile contract test；
+- 将脱敏真实客户端样本加入已有 `tools/verify_chat_client_matrix.py`，并补负向 fallback/degraded E2E；
 - 保持 `/v1/responses`、Anthropic 直通路由和其他未验收路径继续拒绝。
 
 ## 配置边界

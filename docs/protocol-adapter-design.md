@@ -15,6 +15,8 @@
 
 > 实施记录（2026-09-26）：Chat-only 的 P0/P1 已完成验收。A0/A1 的 Chat Envelope、对齐校验、结构化工具字段补扫，以及 S1/S2 的流式脱敏、holdback、路由隔离和保守增量扫描均已实现并通过真实 HTTP 测试。下一阶段不扩展协议范围，而是补齐 `/v1/chat/completions` 下的 Capability 识别和少量特殊语义适配；Responses 只有工具项时的 LiteLLM 绕过仍作为后续协议适配缺口。
 
+> 更新：Chat Capability 的 M0.1–M6 合成夹具范围已实施；下一步是**真实客户端认证**，不是重复开发 Resolver。阶段证据、真实客户端缺口及以后开放 Responses 的门槛见 [`chat-multi-client-stage-acceptance.md`](chat-multi-client-stage-acceptance.md)。
+
 本文承接 [`agent-guard-multi-client-design.md`](agent-guard-multi-client-design.md) 的 Envelope、Capability 和 Scan Scope 设计，把“协议差异”这一层写成可实现的规范。
 
 - 适用对象：**下游边界**上的请求形态——本期 OpenAI Chat Completions；OpenAI Responses API 后续适配（A2A 与 DSH/pi-ai 类自有客户端仍须按实际线格式分类）；Anthropic Messages 预留；Gemini generateContent 不接入。上游部署协议不在范围内（见第 0 节）。

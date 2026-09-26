@@ -14,6 +14,8 @@
 
 > 当前实现记录（2026-09-26）：Chat-only 入口、LiteLLM generic guardrail、agent-guard L1 Envelope/对齐校验、Chat 流式 `incremental_diff`、安全边界下的增量扫描均已落地并通过本机 HTTP 验收。Responses、Anthropic、Gemini 不属于当前交付范围。下一阶段重点是 `/v1/chat/completions` 下的 Capability 适配，而不是新增协议。
 
+> M0.1–M6 的合成夹具阶段已落地，但真实客户端仍需逐个验证实际路由和 LiteLLM→guard 投影；完整 DoD 不能仅凭合成夹具宣告完成。见 [`chat-multi-client-stage-acceptance.md`](chat-multi-client-stage-acceptance.md)。
+
 ## 1. 文档目标
 
 本文定义一个基于 Qwen3Guard 的 Agent 输入输出安全控制方案，覆盖：
