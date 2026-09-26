@@ -38,6 +38,12 @@ def _require_mapping(value: Any, field: str) -> Mapping[str, Any]:
     return value
 
 
+def _require_bool(value: Any, field: str) -> bool:
+    if not isinstance(value, bool):
+        raise ValueError(f"{field} must be a boolean")
+    return value
+
+
 def _require_string_tuple(value: Any, field: str) -> tuple[str, ...]:
     if not isinstance(value, (list, tuple)):
         raise ValueError(f"{field} must be an array of strings")
@@ -137,7 +143,7 @@ class CapabilitySet:
                 data.get("adapter_version"), "adapter_version"
             ),
             matches=tuple(CapabilityMatch.from_dict(match) for match in matches_value),
-            fallback=data.get("fallback"),
+            fallback=_require_bool(data.get("fallback"), "fallback"),
             confidence=_validate_confidence(data.get("confidence")),
         )
 

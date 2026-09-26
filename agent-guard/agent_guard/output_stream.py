@@ -98,7 +98,8 @@ class OutputStreamScanner:
                 cuts = [self._safe_cut(old) for old in prior.raw]
 
             incremental = self._incremental_rules_safe and bool(cuts) and all(cut > 0 for cut in cuts)
-            if incremental:
+            scan_result: OutputScan | None = None
+            if incremental and prior is not None:
                 suffixes = tuple(text[cut:] for text, cut in zip(raw, cuts))
                 result = self.detector.check(self._items(suffixes), output_limits=True)
                 scanned = self._redacted(suffixes, result)
@@ -108,17 +109,20 @@ class OutputStreamScanner:
                     # match spans a comma, so the last comma survives verbatim.
                     boundary = old_sanitized.rfind(",") + 1
                     if boundary <= 0:
-                        incremental = False
                         break
                     sanitized.append(old_sanitized[:boundary] + suffix)
-                if incremental:
-                    full_sanitized = tuple(sanitized)
-            if not incremental:
+                else:
+                    scan_result = OutputScan(result, tuple(sanitized), incremental=True)
+
+            if scan_result is None:
                 result = self.detector.check(self._items(raw), output_limits=True)
                 full_sanitized = self._redacted(raw, result)
+                scan_result = OutputScan(result, full_sanitized, incremental=False)
 
-            self._entries[call_id] = _Entry(raw, full_sanitized, result, now)
+            self._entries[call_id] = _Entry(
+                raw, scan_result.sanitized_texts, scan_result.result, now
+            )
             self._entries.move_to_end(call_id)
             while len(self._entries) > self.max_calls:
                 self._entries.popitem(last=False)
-            return OutputScan(result, full_sanitized, incremental)
+            return scan_result
