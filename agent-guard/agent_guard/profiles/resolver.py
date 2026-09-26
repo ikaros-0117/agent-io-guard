@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 from ..capabilities.base import CapabilityMatcher, CapabilityRegistry
+from ..capabilities.folded_runtime_context import FoldedRuntimeContextCapability
 from ..capabilities.models import CapabilityMatch, CapabilitySet, MatchConfidence
 from ..models import LiteLLMGuardrailRequest
 from .base import ChatProtocolAdapter, ProfileMatch
@@ -16,7 +17,11 @@ class CapabilityResolver:
         registry: CapabilityMatcher | None = None,
         generic_profile: ChatProtocolAdapter | None = None,
     ) -> None:
-        self.registry = registry if registry is not None else CapabilityRegistry()
+        self.registry = (
+            registry
+            if registry is not None
+            else CapabilityRegistry((FoldedRuntimeContextCapability(),))
+        )
         self.generic_profile = (
             generic_profile if generic_profile is not None else GenericChatProfile()
         )

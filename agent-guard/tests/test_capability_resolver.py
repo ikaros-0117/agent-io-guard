@@ -112,6 +112,41 @@ def test_high_confidence_capabilities_are_preserved() -> None:
     assert resolution.confidence == "high"
 
 
+def test_default_registry_detects_known_folded_runtime_context() -> None:
+    payload = LiteLLMGuardrailRequest(
+        input_type="request",
+        structured_messages=[
+            {"role": "user", "content": "Summarize the status."},
+            {
+                "role": "user",
+                "content": "Current runtime context. Sanitized runtime marker.",
+            },
+        ],
+    )
+
+    resolution = CapabilityResolver().resolve(payload)
+
+    assert resolution.capability_ids == ("folded_runtime_context",)
+    assert resolution.fallback is False
+    assert resolution.confidence == "high"
+
+
+def test_unknown_runtime_context_marker_falls_back_to_generic_strict() -> None:
+    payload = LiteLLMGuardrailRequest(
+        input_type="request",
+        structured_messages=[
+            {"role": "user", "content": "<unknown-context>Sanitized marker.</unknown-context>"}
+        ],
+    )
+
+    resolution = CapabilityResolver().resolve(payload)
+
+    assert resolution.matches == ()
+    assert resolution.fallback is True
+    assert resolution.confidence == "low"
+    assert resolution.allows_history_exemption is False
+
+
 def test_low_confidence_resolution_disables_history_exemption() -> None:
     resolver = CapabilityResolver(generic_profile=_LowConfidenceProfile())
 

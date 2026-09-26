@@ -9,19 +9,17 @@ import json
 from dataclasses import dataclass, replace
 from typing import Any
 
+from .capabilities.folded_runtime_context import is_known_runtime_context_text
 from .capabilities.models import Authority, MatchConfidence, Origin, Trust
 from .detector import TextItem
 
 ADAPTER_VERSION = "2026-09-26.1"
 TRUSTED_ROLES = frozenset({"system", "developer"})
-SYNTHETIC_USER_PREFIXES = (
-    "Current runtime context.", "<system-reminder>",
-    "<runtime-context>", "<environment_context>",
-)
 
 
 def is_synthetic_user_text(value: str) -> bool:
-    return value.lstrip().startswith(SYNTHETIC_USER_PREFIXES)
+    """Compatibility wrapper while the capability owns the versioned rules."""
+    return is_known_runtime_context_text(value)
 
 
 def content_blocks(content: Any) -> list[str]:
