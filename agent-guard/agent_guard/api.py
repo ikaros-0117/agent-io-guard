@@ -18,10 +18,13 @@ from .detector import (
 )
 from .envelope import SecurityEnvelope, build_input_envelope
 from .models import (
+    DetectorVersionsResponse,
+    FindingResponse,
     GuardCheckRequest,
     GuardCheckResponse,
     LiteLLMGuardrailRequest,
     LiteLLMGuardrailResponse,
+    SanitizedItemResponse,
 )
 from .output_stream import OutputStreamScanner
 from .rules import STATIC_RULES, RuleAction
@@ -321,7 +324,7 @@ def _response_from_result(
         score=score_by_decision[result.decision.value],
         sanitized=(
             [
-                {"source": item.source, "text": item.text}
+                SanitizedItemResponse(source=item.source, text=item.text)
                 for item in result.sanitized
             ]
             if result.sanitized
@@ -330,22 +333,22 @@ def _response_from_result(
         reason_codes=list(result.reason_codes),
         layer_trace=list(result.layer_trace),
         policy_version=policy_version,
-        detector_versions={
-            "normalizer": "1",
-            "rules": STATIC_RULES_VERSION,
-        },
+        detector_versions=DetectorVersionsResponse(
+            normalizer="1",
+            rules=STATIC_RULES_VERSION,
+        ),
         latency_ms={"total": result.latency_ms, "l1": result.latency_ms},
         request_id=request_id,
         trace_id=trace_id,
         findings=[
-            {
-                "rule_id": finding.rule_id,
-                "category": finding.category,
-                "action": finding.action,
-                "source": finding.source,
-                "source_type": finding.source_type,
-                "risk_level": finding.risk_level,
-            }
+            FindingResponse(
+                rule_id=finding.rule_id,
+                category=finding.category,
+                action=finding.action,
+                source=finding.source,
+                source_type=finding.source_type,
+                risk_level=finding.risk_level,
+            )
             for finding in result.findings
         ],
     )
