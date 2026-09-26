@@ -6,9 +6,10 @@ hook. Structured-only content is still security relevant, but never writable.
 from __future__ import annotations
 
 import json
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import Any
 
+from .capabilities.models import Authority, MatchConfidence, Origin, Trust
 from .detector import TextItem
 
 ADAPTER_VERSION = "2026-09-26.1"
@@ -91,6 +92,12 @@ class SecurityItem:
     content_type: str
     text: str
     scan: bool = True
+    origin: Origin = "unknown"
+    authority: Authority = "unknown"
+    trust: Trust = "unknown"
+    mutable: bool = False
+    confidence: MatchConfidence = "low"
+    capability_ids: tuple[str, ...] = ()
 
     def detection_item(self) -> TextItem:
         return TextItem(
@@ -98,8 +105,46 @@ class SecurityItem:
             text=self.text,
             phase="input",
             source_type="tool_call" if self.content_type == "tool_call" else "message",
-            rewritable=self.text_index is not None,
+            rewritable=self.text_index is not None and self.mutable,
         )
+
+    def to_audit_dict(self) -> dict[str, Any]:
+        """Serialize audit metadata without returning the source text."""
+        return {
+            "item_id": self.item_id,
+            "origin_ref": self.origin_ref,
+            "text_index": self.text_index,
+            "role": self.role,
+            "origin": self.origin,
+            "authority": self.authority,
+            "trust": self.trust,
+            "scope": self.scope,
+            "content_type": self.content_type,
+            "mutable": self.mutable,
+            "confidence": self.confidence,
+            "capability_ids": list(self.capability_ids),
+            "scan": self.scan,
+        }
+
+
+def _security_fields(
+    role: str,
+    content_type: str,
+    text_index: int | None,
+    scan: bool,
+) -> tuple[Origin, Authority, Trust, bool, MatchConfidence]:
+    if role == "system":
+        return "application", "system", "trusted", False, "high"
+    if role == "developer":
+        return "application", "developer", "trusted", False, "high"
+    if role == "user":
+        return "human", "user", "untrusted", text_index is not None, "high"
+    if role == "assistant":
+        return "model", "assistant", "unknown", text_index is not None, "high"
+    if role == "tool":
+        return "tool", "tool", "untrusted", text_index is not None, "high"
+    mutable = scan and text_index is not None and content_type != "tool_call"
+    return "unknown", "unknown", "unknown", mutable, "low"
 
 
 @dataclass(frozen=True, slots=True)
@@ -132,10 +177,15 @@ def build_input_envelope(
 
     def add(ref: str, role: str, scope: str, content_type: str, text: str,
             text_index: int | None = None, scan: bool = True) -> None:
+        origin, authority, trust, mutable, confidence = _security_fields(
+            role, content_type, text_index, scan
+        )
         items.append(SecurityItem(
             item_id=f"litellm:{ref}:{len(items)}", origin_ref=ref,
             text_index=text_index, role=role, scope=scope,
             content_type=content_type, text=text, scan=scan,
+            origin=origin, authority=authority, trust=trust,
+            mutable=mutable, confidence=confidence,
         ))
 
     # Match by value AND order, never by an assumed shared array index. A trusted
@@ -193,7 +243,6 @@ def build_input_envelope(
             scope = ("current_turn" if latest_message_ref is not None
                      and item.origin_ref.startswith(latest_message_ref + ".content[")
                      else "history")
-        resolved.append(SecurityItem(item.item_id, item.origin_ref, item.text_index,
-                                     item.role, scope, item.content_type, item.text, item.scan))
+        resolved.append(replace(item, scope=scope))
     return SecurityEnvelope(tuple(resolved), "aligned" if aligned else "degraded",
                             tuple(dict.fromkeys(reasons)))
