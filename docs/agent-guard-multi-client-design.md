@@ -3,7 +3,7 @@
 | 项目 | 内容 |
 | --- | --- |
 | 状态 | Proposed |
-| 版本 | v0.2 |
+| 版本 | v0.3 |
 | 日期 | 2026-09-26 |
 | 范围 | 方案设计，不包含代码实现 |
 | 核心组件 | agent-guard |
@@ -11,6 +11,27 @@
 | 关键约束 | 无法修改 LiteLLM Proxy，无法修改 Agent 客户端 |
 | 目标 | 在仅修改 agent-guard 的前提下，支持不同客户端的消息结构和安全语义 |
 | 执行优先级 | 见 [`protocol-adapter-design.md`](protocol-adapter-design.md) 第 12 章（P0–P4、R1） |
+| 对齐基准 | 协议方言与对齐层细节以 [`protocol-adapter-design.md`](protocol-adapter-design.md) 为准，见第 0 节 |
+
+## 0. 前置说明：与多协议设计的分工
+
+本文与 [`protocol-adapter-design.md`](protocol-adapter-design.md) 是同一套架构的**总纲**与**落地规范**，不是两套并行方案。分工如下：
+
+| | 本文（多客户端） | 多协议设计 |
+| --- | --- | --- |
+| 回答的问题 | 这条消息**是谁说的**、算不算当前轮 | 这段文本**在哪个字段**、能不能安全改写 |
+| 抽象单位 | Profile：客户端组装习惯 | Adapter：协议方言（Chat Completions / Responses / Anthropic） |
+| 失败姿态 | 策略层可配置（shadow、strict、latest-only） | 对齐层 fail-closed |
+| 证据等级 | 设计推演 | 实测（LiteLLM 1.102.0 + 真实 guard） |
+
+**两者冲突时以多协议设计为准。** 以下四条是本文必须服从的硬约束，正文对应章节已按此对齐（标注“v0.3 对齐”）：
+
+1. **对齐层 fail-closed**：`texts` 与 `structured_messages` 无法对齐时置 `alignment=degraded`，关闭历史豁免，命中一律 `block`/`review`，**不允许任何形式的静默放行（含 `shadow`）**。本文第 9.7、13 章的降级模式只能在**对齐成功**的前提下由策略层选用。
+2. **`current_turn` 边界是对齐层不变式**：由“最后一条 `assistant`/`model` 之后的所有 item”确定（DSH 再剔除 `origin=application` 的 synthetic 尾部）。本文第 9.2 节列出的策略只能在该边界**内部**选候选，不能改写边界。
+3. **协议与客户端是两个正交维度**：协议方言由 Protocol Adapter 判定，Profile 只负责客户端组装习惯（如 DSH 的 synthetic 尾部）。本文第 4.3、6.2、8.2 节中属于“协议/结构签名”的部分归 Adapter。
+4. **`system` / `developer` 走信任策略**（多协议设计决策 1）：受信、不扫描、不改写、返回 `NONE`；保留 item 仅用于对齐校验与审计，后续可升级为“替换 + 放行”。
+
+范围：Anthropic Messages **预留**（R1），仅在确有客户端使用时启用；Gemini generateContent **不接入**。本文第 4.3、6.2 节中的 Anthropic Profile 属预留。
 
 ## 1. 执行摘要
 
@@ -30,7 +51,7 @@
 
 本项目最适合的解决方案是：
 
-> 在 agent-guard 内部建立 **Ingress Compatibility Layer + Profile Registry + Canonical Context Model + Scan Scope Policy + Decision Engine**。上游保持一个固定的 LiteLLM generic 入口，agent-guard 内部按客户端 Profile 做有边界、可测试、可降级的语义重建。
+> 在 agent-guard 内部建立 **Ingress Compatibility Layer + Protocol Adapter Registry + Profile Registry + Canonical Context Model（Envelope）+ Alignment Validator + Scan Scope Policy + Decision Engine**。上游保持一个固定的 LiteLLM generic 入口，agent-guard 内部按协议方言与客户端 Profile 做有边界、可测试、可降级的语义重建。
 
 核心数据流：
 
@@ -93,6 +114,8 @@ Agent Client
 ```
 
 安全控制在 `pre_call` 阶段执行。当前本地场景只启用了输入检查；输出检查是否启用取决于 LiteLLM 现有调用配置。由于本项目不能修改 LiteLLM，输出检测能力必须以实际存在的调用阶段为边界。
+
+> v0.3 对齐（实测）：本仓库 `liteLLM/config.yaml` 已配置 `mode: [pre_call, post_call]`，`config.local.yaml` 只有 `pre_call`；输出侧**非流式**脱敏已验证生效，**流式**在默认 `block_only` 下不生效（需 `incremental_diff`），超长累积文本会触发 413 断流。结论与证据见多协议设计第 9 章。
 
 ### 2.2 已暴露的典型问题
 
@@ -219,6 +242,8 @@ profiles/
 
 不得把 DSH 的 runtime-context 前缀写入通用检测器。
 
+> v0.3 对齐：`openai_responses`、`anthropic_messages` 实际对应的是**协议方言**（Adapter id），协议判定归 Protocol Adapter；本目录只保留客户端组装习惯。`anthropic_messages` 为预留（R1），Gemini 不接入。
+
 ### 4.4 稳定 ID 优于数组下标
 
 模型内部必须使用稳定 `item_id`，而不是 `texts[0]`。
@@ -331,6 +356,8 @@ flowchart TD
   M --> L
 ```
 
+> v0.3 对齐：图中 `Profile Resolver` 只负责**客户端习惯**，协议方言识别由并列的 Protocol Adapter Registry 完成，两者正交（同一个 Profile 可出现在不同方言上），见多协议设计第 5、7.1 节。图中 `Anthropic Profile` 为预留。
+
 ### 6.1 Ingress Compatibility Layer
 
 职责：
@@ -345,7 +372,7 @@ flowchart TD
 
 职责：
 
-- 根据多个信号识别最可能的客户端/协议 Profile。
+- 根据多个信号识别最可能的**客户端** Profile（协议方言不在本组件判定，见第 0 节约束 3）。
 - 输出 Profile ID、版本和匹配置信度。
 - 低置信度时选择 Generic/Unknown Profile。
 - 记录匹配原因，不记录原文。
@@ -415,7 +442,7 @@ flowchart TD
 
 ```json
 {
-  "schema_version": "agent-guard-context/v1",
+  "schema_version": "agent-guard-envelope/v1",
   "request_id": "req-123",
   "trace_id": "trace-456",
   "phase": "input",
@@ -423,8 +450,14 @@ flowchart TD
   "client": {
     "profile_id": "dsh",
     "profile_version": "2026-09-22.1",
-    "protocol": "litellm-generic",
     "confidence": "high"
+  },
+  "protocol": {
+    "ingress": "litellm-generic",
+    "endpoint": "openai/chat/completions",
+    "adapter_id": "openai-chat",
+    "adapter_version": "2026-09-25.1",
+    "alignment": "aligned"
   },
   "route": {
     "model": "deepseek-flash",
@@ -434,17 +467,21 @@ flowchart TD
 }
 ```
 
+> v0.3 对齐：`schema_version` 统一为 `agent-guard-envelope/v1`（原 `agent-guard-context/v1` 是同一模型的总纲命名）；`protocol` 从 `client` 中拆出，携带 `adapter_id` 与 `alignment`，字段与多协议设计 6.1 一致。
+
 ### 7.2 Item 字段
 
 ```json
 {
-  "item_id": "msg-3",
-  "source_index": "texts[2]",
+  "item_id": "openai-chat:messages.2.content.0:b1e9",
+  "origin_ref": "messages[2].content[0]",
+  "text_index": 2,
   "role": "user",
   "origin": "human",
   "authority": "user",
   "trust": "trusted",
   "scope": "current_turn",
+  "turn_id": "turn-7",
   "mutable": true,
   "content": [
     {
@@ -452,11 +489,15 @@ flowchart TD
       "text": "..."
     }
   ],
+  "raw": "...",
+  "view": "...",
   "metadata": {
     "profile_rule": "last_non_synthetic_user"
   }
 }
 ```
+
+> v0.3 对齐：删除 `source_index: "texts[2]"`。以 `texts` 下标定位来源正是错位的成因（多协议设计 F1/F6）；改用 `origin_ref`（可读来源）+ `text_index`（可为 `null`）。`raw` 是唯一可回写对象，`view` 是唯一可匹配对象，见多协议设计第 8 章。
 
 ### 7.3 字段定义
 
@@ -469,6 +510,7 @@ flowchart TD
 | `scope` | current_turn、history、context、output |
 | `mutable` | true、false |
 | `content.type` | text、tool_call、tool_result、image、document、unknown |
+| `turn_id` | 所属轮次，如 `turn-7`；`scope=current_turn` 非空时必存在（v0.3 对齐） |
 
 字段之间不是简单等价：
 
@@ -502,17 +544,19 @@ Item ID 必须满足：
 - 不依赖容易被重排的数组下标。
 - 不能直接包含原始文本。
 
-建议格式：
+建议格式（v0.3 对齐：与多协议设计的 Envelope item 保持一致）：
 
 ```text
-<profile>:<source>:<index>:<short-hash>
+<adapter_id>:<origin_ref>:<short-hash>
 ```
 
 例如：
 
 ```text
-dsh:texts:2:3af1c2
+openai-chat:messages.2.content.0:b1e9
 ```
+
+item 必须同时携带 `origin_ref`（可读来源，如 `messages[2].content[0]`）与 `text_index`（在 `texts` 中的下标）。仅存在于 `structured_messages`、不在 `texts` 中的内容，`text_index` 必须为 `null`，否则会造成错位。
 
 ### 7.5 内容块
 
@@ -563,6 +607,8 @@ dsh:texts:2:3af1c2
 | model | 低 | 多客户端可能共用同一模型 |
 | `additional_provider_specific_params` | 中 | 仅在配置中已存在时使用 |
 | `litellm_version` | 中 | 判断转换行为版本 |
+
+> v0.3 对齐：表中“`structured_messages` 结构签名”“`texts` 与 structured 对齐方式”属于**协议方言**信号，应由 Protocol Adapter 处理，不用于 Profile 匹配。Profile 匹配保留 header、role 序列、synthetic 前缀、`additional_provider_specific_params` 等客户端习惯信号。
 
 匹配规则应输出：
 
@@ -687,6 +733,8 @@ Profile 变更不能隐式改变其他 Profile。发现误报或漏报时，应�
 | `all_users_in_current_turn` | 无法可靠区分时 | 误报增加 |
 | `all_user_messages` | 高风险全量扫描 | 历史攻击反复阻断 |
 
+> v0.3 对齐：`current_turn` 的**边界**是对齐层的不变式——“最后一条 `assistant`/`model` 之后的所有 item”（DSH 再剔除 `origin=application` 的 synthetic 尾部），见多协议设计 7.4。上表是在该边界**内部**选择候选的策略，不能改写边界；`all_users_in_current_turn`、`all_user_messages` 属于 Scan Scope 的扫描范围选择，不改变 item 的 `scope` 标注。`alignment=degraded` 时历史豁免整体失效，这些策略不得把命中降级为放行。
+
 ### 9.3 DSH 的处理
 
 DSH Profile 必须区分：
@@ -748,6 +796,8 @@ history = 之前消息
 - 需要记录 `provenance_confidence=low`。
 - 不能把“没有发现 structured_messages”当作安全信号。
 
+> v0.3 对齐：缺失 `structured_messages` 会触发 `alignment=degraded`，此时**历史豁免整体失效、命中一律 `block`/`review`**，等价于 strict/full-scan 的失败姿态；`latest_only` 在 degraded 下不可用。见第 0 节约束 1 与多协议设计 11.3。
+
 ### 9.6 历史失败轮次
 
 客户端可能把已经失败的攻击轮次继续保存在历史中。agent-guard 需要考虑三种情况：
@@ -760,6 +810,8 @@ history = 之前消息
 3. 当前攻击与历史攻击同时出现：
    - 只要当前消息命中硬拦截，就 `BLOCKED`。
    - 历史攻击不能覆盖当前攻击的优先决策。
+
+> v0.3 对齐：上面第 1 条（历史可修改 → 替换后放行）仅在对齐成功时成立。`alignment=degraded` 时关闭历史豁免，历史命中同样按 `block`/`review` 处理，不允许以“替换历史”为代价放行。
 
 ### 9.7 低置信度原则
 
@@ -774,6 +826,8 @@ history = 之前消息
 - 消息已经被客户端或 LiteLLM 转换过多次。
 
 低置信度不能默认 allow。
+
+> v0.3 对齐：其中“`texts` 和 structured 数量无法对齐”一项属于对齐层，触发 `alignment=degraded`：**关闭历史豁免，命中一律 `block`/`review`**，不接受 `shadow`、latest-only 等柔性降级（多协议设计 6.4）。其余低置信度项由策略层按路由配置处理。
 
 ## 10. Scan Scope 与策略
 
@@ -811,13 +865,13 @@ risk_level
 | 当前用户输入 | 硬拦截 | `block` |
 | 历史用户输入 | 硬拦截且可修改 | `intervene/redact` |
 | 历史用户输入 | 硬拦截且不可修改 | `block` |
-| synthetic context | 指令样式 | 按 context policy |
+| synthetic context | 指令样式 | 按 context policy：`system`/`developer` 走信任策略不扫描（第 0 节约束 4）；DSH 折叠进 `role=user` 的上下文由 Profile 规则识别，未知前缀按当前轮处理。后者是否同样适用信任策略尚未拍板（见多协议设计 14.2） |
 | RAG 文档 | 间接注入 | `block` 或 `quarantine` |
 | 工具结果 | 间接注入 | `block` 或隔离引用 |
 | 工具参数 | 危险命令 | `block` 或拒绝工具执行 |
 | 模型输出 | PII/Secret | `redact` 或 `block` |
 | 不确定来源 | 高风险 | `fail_closed` |
-| 不确定来源 | 低风险 | `shadow` 或 `review` |
+| 不确定来源 | 低风险 | `review`；对齐失败（`degraded`）时本行不适用，见第 0 节约束 1 |
 
 ## 11. 规则适用模型
 
@@ -887,7 +941,7 @@ suspicious
 | `intervene` | `GUARDRAIL_INTERVENED` | 返回改写后的内容 |
 | `block` | `BLOCKED` | LiteLLM 返回 400 |
 | `review` | 取决于当前配置 | 没有 review 协议时 fail closed |
-| `suspicious` | 首期可 `NONE` | 后续接入 L2/L3 |
+| `suspicious` | 首期可 `NONE` | 仅表示“L3 未接入、无可执行结论”；对齐失败或来源未知时不得使用，必须按第 0 节约束 1 走 `block`/`review` |
 
 ### 12.3 响应必须可审计
 
@@ -898,6 +952,9 @@ suspicious
 - phase
 - profile_id
 - profile_version
+- adapter_id
+- adapter_version
+- alignment
 - policy_version
 - rules_version
 - decision
@@ -906,7 +963,7 @@ suspicious
 - scope
 - layer_trace
 - confidence
-- mutation target item ID
+- mutation target item ID 与 origin_ref
 - 不包含原文的 evidence hash
 
 ## 13. 降级策略
@@ -923,18 +980,22 @@ suspicious
 | `shadow` | 只记录，不影响请求 |
 | `fail_closed` | 无法判断即阻止 |
 
+> v0.3 对齐：上表是**策略层**的降级模式，只有在 `alignment=aligned` 时才可选。对齐失败（`degraded`）时不进入本表：直接关闭历史豁免并按命中 `block`/`review`（多协议设计 6.4）。顺序恒为“先对齐、后策略”。
+
 ### 13.2 默认建议
 
 | 场景 | 默认模式 |
 | --- | --- |
 | 已认证复杂 Agent | Profile enforce |
-| 新客户端首次上线 | shadow |
+| 新客户端首次上线 | shadow（仅当对齐成功；用于观测误报与漏报） |
 | 高敏业务 | strict_history |
 | 普通聊天 | current_turn |
-| 无法识别客户端 | fail_closed 或 shadow，按路由决定 |
+| 无法识别客户端 | fail_closed（对齐失败时不得用 shadow） |
 | 工具执行相关 | fail_closed |
 
 ### 13.3 LiteLLM 和客户端不可修改的限制
+
+> v0.3 对齐（实测）：本仓库 `liteLLM/config.yaml` 已启用 `pre_call` + `post_call`，`config.local.yaml` 只有 `pre_call`。输出侧非流式脱敏已验证生效；流式默认 `block_only` 下**不生效**，超长累积文本会触发 413 断流。对外的能力口径与排期见多协议设计第 9、12 章。
 
 如果 LiteLLM 当前只调用 `pre_call`：
 
@@ -1053,6 +1114,8 @@ layer_trace
 | 工具参数危险命令 | `BLOCKED` |
 | 工具参数 PII | 不可改写时 `BLOCKED` |
 | 输出 Secret | 有输出阶段时 redact/block |
+| system/developer 内注入 | 不扫描，返回 `NONE`（第 0 节约束 4） |
+| `texts` 与 structured 无法对齐 | `alignment=degraded`，关闭历史豁免，命中一律 `block`/`review` |
 
 ### 16.3 对抗测试
 
@@ -1142,7 +1205,8 @@ layer_trace
 - 历史攻击不会反复阻止正常新输入。
 - 历史攻击不可改写时明确阻止。
 - 当前攻击始终优先 `BLOCKED`。
-- 无 structured_messages 时能按配置降级，不静默 allow。
+- 无 structured_messages 时能按配置降级，不静默 allow；对齐失败时按第 0 节约束 1 走 fail-closed。
+- `alignment=degraded` 时不存在任何静默放行路径（含 `shadow`）。
 - Profile 识别、置信度和 fallback 可观测。
 - 所有 mutation 基于稳定 item ID。
 - 规则核心不包含客户端特有内容前缀。

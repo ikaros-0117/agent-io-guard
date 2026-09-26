@@ -578,8 +578,9 @@ def build_envelope(payload):
 
 1. 工具结果注入默认 `block` 还是 `quarantine`。（阻塞 A3）
 2. DSH 类折叠客户端的 `origin=application` 识别规则由谁维护、如何版本化。（阻塞 A2）
-3. Anthropic 是否纳入、何时启用（R1）；若不启用，该路由的承诺等级如何写。（R1 启用前）
-4. 图片/文档与多模态在本层的降级策略（记录、放行还是阻断）。（P0–P4 之外，暂不排期）
+3. 决策 1 的信任策略是否也覆盖 DSH 等客户端**折叠进 `role=user`** 的 runtime context（`origin=application`、`scope=context`）？若覆盖，A2 的“未知前缀按当前轮处理”需要相应放宽。（阻塞 A2）
+4. Anthropic 是否纳入、何时启用（R1）；若不启用，该路由的承诺等级如何写。（R1 启用前）
+5. 图片/文档与多模态在本层的降级策略（记录、放行还是阻断）。（P0–P4 之外，暂不排期）
 
 ### 14.3 验收标准
 
