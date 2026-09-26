@@ -2,7 +2,7 @@
 
 | 项目 | 内容 |
 | --- | --- |
-| 状态 | M0.1–M6 已实现合成夹具范围；真实客户端认证待完成 |
+| 状态 | Suspended；M0.1–M6 已实现合成夹具范围，真实客户端专项适配与 Responses 适配暂停 |
 | 版本 | v0.3 |
 | 日期 | 2026-09-26 |
 | 适用路由 | `/v1/chat/completions` |
@@ -13,6 +13,8 @@
 > 本文是代码实施手册。它取代“每个客户端一个完整 Profile”的旧路线。Client Profile 只作为能力组合和观测标签；只有出现新的消息语义时，才新增 Capability Adapter。
 
 > **实施结果与 DoD 逐项判定**见 [`chat-multi-client-stage-acceptance.md`](chat-multi-client-stage-acceptance.md)。下面的 M 任务记录原定开发步骤；任务代码完成不等于真实 DSH/OpenCode/Claude Code 等客户端已获认证。
+
+> **暂停决策（2026-09-26）**：客户端专项适配与 `/v1/responses` 适配暂停。本文保留已完成阶段的代码级记录；后续进入实际投产准备时，再根据具体客户端、版本、实际路由和脱敏请求样本恢复测试、微调和验收。恢复前维持 Chat-only 路由隔离，`/v1/responses` 不开放。
 
 ## 1. 目标
 
@@ -406,7 +408,7 @@ agent-guard/tests/test_fixture_matchability.py
 
 ## 11. Definition of Done
 
-多客户端 Chat **正式完成**仍须同时满足下列全部条件。当前逐项状态见 [阶段验收记录](chat-multi-client-stage-acceptance.md)；M6 合成夹具通过不等于本节 DoD 全部完成：
+客户端专项适配恢复后，多客户端 Chat **正式完成**仍须同时满足下列全部条件。当前逐项状态见 [阶段验收记录](chat-multi-client-stage-acceptance.md)；M6 合成夹具通过不等于本节 DoD 全部完成：
 
 1. 目标客户端清单和实际路由已冻结；
 2. 每个客户端都有脱敏 fixture，或明确记录复用 Generic；

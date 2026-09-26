@@ -2,7 +2,7 @@
 
 | 项目 | 内容 |
 | --- | --- |
-| 状态 | Proposed（能力模型路线） |
+| 状态 | Suspended（能力模型与合成夹具已实施；真实客户端专项适配暂停） |
 | 版本 | v0.6 |
 | 日期 | 2026-09-26 |
 | 范围 | `/v1/chat/completions` 多客户端语义兼容；不扩展协议 |
@@ -13,6 +13,8 @@
 > 代码实施手册：[`chat-multi-client-adaptation-implementation.md`](chat-multi-client-adaptation-implementation.md)。本文件说明为什么采用 Capability 路线、Canonical Envelope 如何表达语义，以及本阶段的安全边界。
 
 > **阶段状态**：M0/M0.1–M6 已完成合成夹具范围的代码与真实网关回放；真实客户端版本、实际路由和请求尚未逐一认证，不能称为完整多客户端闭环。逐项验收与未完成项见 [`chat-multi-client-stage-acceptance.md`](chat-multi-client-stage-acceptance.md)。
+
+> **暂停决策（2026-09-26）**：客户端专项适配与 `/v1/responses` 适配暂时 suspend。当前不继续扩展客户端 Profile、Capability 或 Responses 协议；已有代码、设计和夹具保留作回归与预研。后续进入实际投产准备时，再针对确定的具体客户端、版本、实际路由和脱敏请求样本逐项测试与微调。
 
 ## 1. 当前状态与核心结论
 
@@ -339,9 +341,9 @@ M6      Chat client matrix + 真实 Chat-only E2E
 per-client full Profile implementation
 ```
 
-## 9. 验收标准
+## 9. 恢复后验收标准（当前暂停）
 
-多客户端 Chat 阶段完成必须满足：
+本节仅在恢复客户端专项适配后执行。多客户端 Chat 阶段正式完成必须满足：
 
 1. 目标客户端清单和实际路由已冻结；
 2. 每个客户端均有脱敏 fixture，或明确记录复用 Generic；

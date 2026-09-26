@@ -90,6 +90,8 @@ fixture/profile/capability/action/alignment/confidence/resolver_fallback，且�
 **真实的是网关链路，不是客户端进程。** 阶段验收及剩余证据见
 [`../docs/chat-multi-client-stage-acceptance.md`](../docs/chat-multi-client-stage-acceptance.md)。
 
+> **当前决策（2026-09-26）**：客户端专项适配与 `/v1/responses` 适配暂停（SUSPENDED）。上述 M6 脚本和合成夹具仅保留作现有 Chat 链路回归与预研，不再据此继续扩展客户端语义；待实际投产准备时针对具体客户端恢复测试和微调。
+
 ## Chat 客户端夹具（M0/M0.1/M5）
 
 ```bash
@@ -117,7 +119,7 @@ agent-guard/.venv/bin/python tools/verify_stream_guard_e2e.py
 
 拆分密钥、拆分 PEM 私钥以及 10 万字符长流中密钥均已验证客户端只收到脱敏文本且不中断。
 
-Responses 为后续适配，当前有一项明确的 LiteLLM 边界缺口：请求若只有 `function_call_output` 且无可提取文本，翻译层直接返回，guard 调用为 0 次；脚本以 `[KNOWN GAP]` 明示。接入层在解决该缺口前不得允许这类纯工具项请求绕过扫描。
+Responses 适配当前暂停（SUSPENDED）。已有测试记录一项明确的 LiteLLM 边界缺口：请求若只有 `function_call_output` 且无可提取文本，翻译层直接返回，guard 调用为 0 次；脚本以 `[KNOWN GAP]` 明示。恢复前接入层必须继续拒绝该路由，不得允许纯工具项请求绕过扫描。
 
 当前协议矩阵状态（Chat 列为本期范围；Responses 列仅为后续诊断）。Capability/语义矩阵见上方 M6 脚本；未知 synthetic 前缀与 span 回写仍是后续任务：
 

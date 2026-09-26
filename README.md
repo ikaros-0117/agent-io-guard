@@ -32,11 +32,13 @@ Client -> Chat-only ingress -> LiteLLM Proxy -> agent-guard -> Memory/Redis/Qwen
 | --- | --- |
 | P0 | `/v1/chat/completions` 输入侧判定正确性（对齐校验 + 结构化字段补扫） |
 | P1 | `/v1/chat/completions` 流式输出的脱敏生效与体积治理 |
-| P2 | `/v1/chat/completions` 多客户端能力适配与验收（Generic Chat + Capability Detection） |
+| P2 | `/v1/chat/completions` Generic Chat + Capability 合成验收已完成；客户端专项适配暂停 |
 | P3–P4 | 工具链策略、span 精确回写、残余风险文档化 |
-| 后续 | `/v1/responses` 适配与验收；Anthropic 按需启用 |
+| 后续 | `/v1/responses` 适配暂停（SUSPENDED）；Anthropic 按需启用 |
 
 **Chat 路由 P0/P1 已完成；M0.1–M6 的能力模型和合成夹具验收已落地，但真实客户端认证尚未完成。** 当前可证明的是 Generic Chat、折叠 runtime context、工具链等已测消息形状通过真实本机 HTTP 链路；不能推断所有 DSH、OpenCode、Claude Code 或 Codex 版本均受保护。Responses 仍不属于本期承诺。
+
+> **阶段决策（2026-09-26）：客户端专项适配与 `/v1/responses` 适配暂停（SUSPENDED）。** 当前不再扩展客户端 Profile、Capability 或 Responses 协议；已有代码、夹具和验证脚本保留作回归与预研。恢复时机为后续进入实际投产准备时，基于届时确定的具体客户端、版本、实际路由和脱敏请求样本，逐客户端测试、微调并完成验收。恢复前继续维持 Chat-only 路由隔离，`/v1/responses` 不开放。
 
 ### 实施进度（2026-09-26）
 
@@ -46,11 +48,11 @@ Client -> Chat-only ingress -> LiteLLM Proxy -> agent-guard -> Memory/Redis/Qwen
 - 路由隔离：新增精确路径白名单入口（Chat + 模型列表），LiteLLM 后端仅监听回环地址；真实进程测试证明 Responses/未知路由被拒、Chat/SSE 正常。增量扫描按调用 ID 缓存累计文本，在可证明安全的逗号边界只扫新增部分；对 PEM、编码、Unicode、缺失调用 ID 等不确定情况自动回退全量扫描，并保留原输出上限。
 - **剩余边界**：只能对外暴露 Chat-only 入口，不能直连私有 LiteLLM；Responses 纯工具项绕过仍为后续协议缺口。M6 的“真实网关”是链路真实，**夹具仍是合成数据**；真实客户端请求采集、负向端到端、完整审计事件与 span 精确回写仍待完成。逐项状态见 [阶段验收记录](docs/chat-multi-client-stage-acceptance.md)。
 
-## 下一步：完成 Chat Completions 多客户端闭环
+## 后续路线：客户端专项与 Responses 适配暂停
 
-基础 Capability 实现和合成矩阵已完成。下一步不是再为每个客户端复制一套 Profile，而是用**真实客户端证据**验证它们实际调用的协议、消息组装和 guard 入参，再决定复用 Generic/现有 Capability 或新增最小适配。
+基础 Capability 实现和合成矩阵已完成，但当前阶段不继续做真实客户端专项适配或 Responses 适配。恢复时不为每个客户端预建完整 Profile；先用实际投产目标客户端的真实证据，确认其协议、消息组装和 LiteLLM→guard 投影，再决定复用 Generic/现有 Capability 或增加最小适配。
 
-计划顺序：
+恢复后的计划顺序：
 
 1. 按实际使用量确定目标客户端及版本，先确认它们调用 Chat 还是 Responses/原生接口；只对 Chat 客户端采集脱敏的原始请求及 LiteLLM→guard 投影。
 2. 将真实样本与 16 个合成 fixture 对照；已有结构复用 Generic/Capability，新结构才新增最小 Adapter，并补齐负向 fallback/degraded 端到端测试。
@@ -62,7 +64,7 @@ Client -> Chat-only ingress -> LiteLLM Proxy -> agent-guard -> Memory/Redis/Qwen
 - [完整架构设计](docs/architecture.md)：整体方案、三层检测流水线、流式与降级策略。
 - [agent-guard 多客户端兼容与统一安全控制设计](docs/agent-guard-multi-client-design.md)：Capability、Canonical Context、Generic fallback 与长期路线。
 - [Chat 多客户端适配代码级开发文档](docs/chat-multi-client-adaptation-implementation.md)：DeepSeek/代码代理执行用的文件级任务、接口、夹具、测试和验收清单。
-- [Chat 多客户端阶段验收记录](docs/chat-multi-client-stage-acceptance.md)：M0–M6 逐项证据、未完成的真实客户端认证与下一步顺序。
+- [Chat 多客户端阶段验收记录](docs/chat-multi-client-stage-acceptance.md)：M0–M6 逐项证据、暂停决策与恢复条件。
 - [多协议输入输出适配设计](docs/protocol-adapter-design.md)：协议边界、Canonical Security Envelope、缺陷证据与执行优先级（第 12 章）。
 - [LiteLLM 网关实现与运行说明](liteLLM/README.md)
 - [agent-guard L1 服务与运行说明](agent-guard/README.md)

@@ -111,11 +111,11 @@ Content-Type: application/json
 
 如果 agent-guard 暂时不可用，可以在 `config.yaml` 中关闭整个 `guardrails` 配置块。若必须保持原有 `/v1/guard/check` 协议，则不能只靠标准配置，需要编写 LiteLLM `CustomGuardrail` 适配器。
 
-## 下一阶段：Chat 多客户端闭环
+## 后续阶段（暂停）：Chat 多客户端闭环
 
-网关层继续保持单一 Chat-only 入口，不为 DSH、OpenCode、Claude Code 等客户端增加多套网关。它们**只有实际调用** `/v1/chat/completions` 才进入本期链路；差异由 guard 的 Generic Chat + Capability Resolver 处理。现有合成夹具已通过真实网关回放，目标客户端的实际请求/路由仍需逐个取证。
+**客户端专项适配与 `/v1/responses` 适配当前暂停（SUSPENDED）**，待实际投产准备时针对具体客户端测试和微调。恢复前，网关层继续维持单一 Chat-only 入口，不为 DSH、OpenCode、Claude Code 等客户端增加多套网关。它们**只有实际调用** `/v1/chat/completions` 才进入本期链路；差异由 guard 的 Generic Chat + Capability Resolver 处理。现有合成夹具已通过真实网关回放，目标客户端的实际请求/路由留待恢复后逐个取证。
 
-下一阶段的网关侧工作主要是：
+恢复后的网关侧工作主要是：
 
 - 为每个目标客户端保存真实请求夹具；
 - 记录客户端实际是否发送完整历史、工具消息和 runtime context；

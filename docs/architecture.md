@@ -12,9 +12,9 @@
 
 > 当前 Chat 多客户端的代码实施以 [`chat-multi-client-adaptation-implementation.md`](chat-multi-client-adaptation-implementation.md) 为准；本文保留总体架构、L1/L2/L3、缓存、可观测性和生产化路线。多客户端兼容采用 Generic Chat + Capability Detection，不按客户端数量复制完整 Profile。
 
-> 当前实现记录（2026-09-26）：Chat-only 入口、LiteLLM generic guardrail、agent-guard L1 Envelope/对齐校验、Chat 流式 `incremental_diff`、安全边界下的增量扫描均已落地并通过本机 HTTP 验收。Responses、Anthropic、Gemini 不属于当前交付范围。下一阶段重点是 `/v1/chat/completions` 下的 Capability 适配，而不是新增协议。
+> 当前实现记录（2026-09-26）：Chat-only 入口、LiteLLM generic guardrail、agent-guard L1 Envelope/对齐校验、Chat 流式 `incremental_diff`、安全边界下的增量扫描均已落地并通过本机 HTTP 验收。Responses、Anthropic、Gemini 不属于当前交付范围。**客户端专项适配与 `/v1/responses` 适配当前暂停（SUSPENDED）**；恢复时机为实际投产准备阶段，届时针对确定的具体客户端、版本、实际路由和脱敏样本测试与微调。
 
-> M0.1–M6 的合成夹具阶段已落地，但真实客户端仍需逐个验证实际路由和 LiteLLM→guard 投影；完整 DoD 不能仅凭合成夹具宣告完成。见 [`chat-multi-client-stage-acceptance.md`](chat-multi-client-stage-acceptance.md)。
+> M0.1–M6 的合成夹具阶段已落地，但真实客户端认证已随本阶段暂停，后续在投产前恢复并逐个验证实际路由和 LiteLLM→guard 投影；完整 DoD 不能仅凭合成夹具宣告完成。见 [`chat-multi-client-stage-acceptance.md`](chat-multi-client-stage-acceptance.md)。
 
 ## 1. 文档目标
 
@@ -446,7 +446,7 @@ Qwen3Guard 的分数只作为风险信号，不应直接等同于最终业务动
 | 按句/块缓冲检测 | 平衡延迟和安全性 | 仍有有限泄漏窗口 | 一般业务 |
 | Qwen3Guard-Stream 或 chunk 检测 | 窗口更小 | 实现和部署复杂 | 大规模流式场景 |
 
-### 9.3 当前实现与下一阶段建议
+### 9.3 当前实现与后续建议（客户端专项适配暂停）
 
 实测结论（LiteLLM 1.102.0 + agent-guard，证据与脚本见 `tools/`）：
 
@@ -460,7 +460,7 @@ Qwen3Guard 的分数只作为风险信号，不应直接等同于最终业务动
 - `/v1/chat/completions` 已开启 `incremental_diff`，guard 返回 `stream_holdback_chars`，并在安全边界下复用流式前缀扫描结果。
 - 对 PEM、编码、Unicode、非追加式内容或缺少稳定调用 ID 的情况，回退全量扫描。
 - Chat-only 入口负责隔离 Responses 等未验收路由。
-- 下一阶段对 DSH、OpenCode、Claude Code 等实际 Chat 请求提取 Capability；只有出现新的消息语义时才增加最小 Adapter，并为能力组合做流式回归。
+- 客户端专项适配暂停；待实际投产准备时，再针对 DSH、OpenCode、Claude Code 等确定客户端的真实 Chat 请求验证现有 Capability，只有出现新的消息语义时才增加最小 Adapter，并为能力组合做流式回归。
 - 在文档和客户端协议中明确：超时、拒绝、截断和审核状态的处理方式。
 
 详细设计与排期见 [`protocol-adapter-design.md`](protocol-adapter-design.md) 第 9 章与第 12 章（协议适配优先级 P1）。
@@ -567,7 +567,7 @@ Qwen3Guard 主要是文本安全模型。若后续需要图片、音频或视频
 
 ## 15. 性能与容量目标
 
-在下一阶段多客户端 Capability 和后续 L2/L3 实施前，需要确定以下预算：
+在恢复客户端专项适配并实施后续 L2/L3 前，需要确定以下预算：
 
 - LiteLLM 引入的额外 P95 延迟。
 - L1 的目标 P95 延迟。
@@ -676,7 +676,7 @@ Client
 
 ## 19. 分阶段实施建议
 
-> 本节用 M0–M2 描述里程碑范围；当前执行以 Chat-only 的 P0/P1 收尾和下一阶段多客户端 Chat Capability 适配为准。Responses/Anthropic/Gemini 不纳入当前客户端闭环。
+> 本节用 M0–M2 描述里程碑范围；当前执行以 Chat-only 的 P0/P1 回归为准。客户端专项适配与 Responses 适配已暂停（SUSPENDED），待实际投产准备时再针对具体客户端测试和微调。Anthropic/Gemini 不纳入当前客户端闭环。
 
 ### M0：Chat-only L1 安全链路（已完成）
 
@@ -687,7 +687,7 @@ Client
 - `request_id`、`trace_id`、规则版本和层命中记录。
 - Redis、Qwen3Guard、shadow 误报观察和人工审核仍属于后续能力。
 
-### M1：Chat 多客户端能力闭环（下一阶段）
+### M1：Chat 多客户端能力闭环（合成范围已完成；真实客户端专项暂停）
 
 - 冻结 DSH、OpenCode、Claude Code 等实际使用 Chat 的客户端夹具。
 - 完成 generic/dsh fixture 可识别性审计；无法区分的场景回退 Generic。

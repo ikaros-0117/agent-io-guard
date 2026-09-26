@@ -11,11 +11,13 @@
 
 > Chat 多客户端的代码任务不在本文展开，统一见 [`chat-multi-client-adaptation-implementation.md`](chat-multi-client-adaptation-implementation.md)。本文只定义协议边界、Envelope 不变式和 Chat/Responses 的范围决策。
 
-> 本期范围决策（2026-09-26）：**只对客户端 `/v1/chat/completions` 作 P0/P1 安全验收和承诺；`/v1/responses` 后续适配，不作为本期交付条件。** 已有 Responses 代码和测试是预研，不等于完整支持。本期提供 `liteLLM/serve_chat_only.py` 作为路由隔离入口；`config.yaml` 本身不封禁 Responses，直接暴露 LiteLLM 后端不属于本期安全部署。下文 F6 与 Responses 适配规则保留作为后续设计，旧版“OpenAI 家族均属 P0”的措辞以本决策及第 12–14 章更新为准。
+> 本期范围决策（2026-09-26）：**只对客户端 `/v1/chat/completions` 作 P0/P1 安全验收和承诺；`/v1/responses` 适配暂停，不作为本期交付条件。** 已有 Responses 代码和测试是预研，不等于完整支持。本期提供 `liteLLM/serve_chat_only.py` 作为路由隔离入口；`config.yaml` 本身不封禁 Responses，直接暴露 LiteLLM 后端不属于本期安全部署。下文 F6 与 Responses 适配规则保留作为后续设计，旧版“OpenAI 家族均属 P0”的措辞以本决策及第 12–14 章更新为准。
 
-> 实施记录（2026-09-26）：Chat-only 的 P0/P1 已完成验收。A0/A1 的 Chat Envelope、对齐校验、结构化工具字段补扫，以及 S1/S2 的流式脱敏、holdback、路由隔离和保守增量扫描均已实现并通过真实 HTTP 测试。下一阶段不扩展协议范围，而是补齐 `/v1/chat/completions` 下的 Capability 识别和少量特殊语义适配；Responses 只有工具项时的 LiteLLM 绕过仍作为后续协议适配缺口。
+> **暂停决策（2026-09-26）**：客户端专项适配与 `/v1/responses` 适配暂停（SUSPENDED）。当前不继续扩展客户端 Profile、Capability 或 Responses 协议；已有设计与测试仅保留作预研和回归。待实际投产准备时，根据具体客户端、版本、实际路由和脱敏请求样本恢复测试与微调。
 
-> 更新：Chat Capability 的 M0.1–M6 合成夹具范围已实施；下一步是**真实客户端认证**，不是重复开发 Resolver。阶段证据、真实客户端缺口及以后开放 Responses 的门槛见 [`chat-multi-client-stage-acceptance.md`](chat-multi-client-stage-acceptance.md)。
+> 实施记录（2026-09-26）：Chat-only 的 P0/P1 已完成验收。A0/A1 的 Chat Envelope、对齐校验、结构化工具字段补扫，以及 S1/S2 的流式脱敏、holdback、路由隔离和保守增量扫描均已实现并通过真实 HTTP 测试。Chat Capability 的合成范围也已完成；客户端专项适配和 Responses 适配随后暂停。Responses 只有工具项时的 LiteLLM 绕过仍作为恢复适配前必须解决的缺口。
+
+> 更新：Chat Capability 的 M0.1–M6 合成夹具范围已实施。**真实客户端认证和 Responses 适配当前暂停**，待实际投产准备时针对具体客户端恢复，届时仍应优先复用 Resolver，而不是重复开发。阶段证据、暂停决策及以后开放 Responses 的门槛见 [`chat-multi-client-stage-acceptance.md`](chat-multi-client-stage-acceptance.md)。
 
 本文承接 [`agent-guard-multi-client-design.md`](agent-guard-multi-client-design.md) 的 Envelope、Capability 和 Scan Scope 设计，把“协议差异”这一层写成可实现的规范。
 
@@ -81,14 +83,14 @@ v0.2 变更：新增第 0 节“两层协议边界”；第 1.1 节与第 12 章
 | --- | --- | --- | --- |
 | **P0** | Chat Completions 输入侧 | 已完成：对齐校验、`degraded` strict、结构化字段补扫 | A0、A1 |
 | **P1** | Chat Completions 流式文本输出侧 | 已完成约定验收：流式脱敏、holdback、长流治理和安全边界增量扫描 | S1、S2 |
-| **P2** | Chat 多客户端语义识别 | Generic Chat + Capability Detection；只有新语义才增加 Capability Adapter | A2、D2 |
+| **P2** | Chat 多客户端语义识别 | Generic Chat + Capability Detection 合成范围已完成；客户端专项适配暂停 | A2、D2 |
 | **P3** | 工具链与改写质量 | 工具结果策略；span 双视图回写 | A3、A4 |
 | **P4** | 残余风险文档化 | 输出侧 `tool_call` 缺口 + 路由前置条件 | S3 |
-| **后续** | Responses / Anthropic | `/v1/responses` 后续适配；Anthropic 按需启用 | R1 |
+| **后续** | Responses / Anthropic | `/v1/responses` 适配暂停（SUSPENDED）；Anthropic 按需启用 | R1 |
 
 推论：
 
-- **P0 + P1 是 Chat 协议的基础闭环，现已完成。** 下一阶段的目标是能力闭环：同一 `/v1/chat/completions` 下，普通客户端自动走 Generic Chat，已有语义复用 Capability，只有新消息语义才新增适配；无法判断时 strict/fail-closed。
+- **P0 + P1 是 Chat 协议的基础闭环，现已完成。** Generic/Capability 的合成范围也已实现；客户端专项适配暂停，待投产前基于具体客户端证据恢复。同一 `/v1/chat/completions` 下继续坚持 Generic/Capability 路线，无法判断时 strict/fail-closed。
 - 本期验收矩阵只以 Chat Completions 为准（第 13 章）；Responses 与 Anthropic 为后续/预留，Gemini 不接入。
 - 本期重点是 **Chat 输入判定正确性**（A 系列）与 **Chat 流式文本输出防护**（S 系列）；Responses 不因复用通用代码而自动进入承诺范围。
 - 上游部署协议不占优先级：不写缓解、不做回归，避免把不可见的差异当成自己的工作量。
@@ -363,7 +365,7 @@ view = canonicalize(raw) 匹配视图
 | --- | --- | --- |
 | OpenAI Chat（非流式） | `choices[].message.content` / `tool_calls` | **主场景**：文本脱敏回写；`tool_calls` 命中即 `block` |
 | OpenAI Chat（流式） | `delta.content` 增量 | **主场景**：用 `incremental_diff` 让改写真正到达客户端（9.2） |
-| OpenAI Responses | `output[]` items | 后续适配：逐 item 建 canonical 并单独验收，当前不承诺 |
+| OpenAI Responses | `output[]` items | 适配暂停：恢复后逐 item 建 canonical 并单独验收，当前不承诺 |
 | Anthropic Messages | content blocks | 预留：文本块可回写；`tool_use.input` 只检测不改写 |
 | Gemini generateContent | `parts[]` | 不接入：仅登记缺口 |
 
@@ -503,7 +505,7 @@ def build_envelope(payload):
 2. **上游部署协议对 guard 不可见**（第 0 节）：归一化由 LiteLLM 完成，guard 不为上游差异增加适配或回归。
 3. **输入侧漏检是安全缺口，输出侧脱敏失效是静默失败**：本期 P0 验收 Chat 输入正确性，P1 验收 Chat 流式文本脱敏；F1/F2/F6 的 Responses 证据保留为后续适配依据。
 4. **Anthropic 与 Gemini 不参与排期**：Gemini 不使用；Anthropic 极少或不用，且 A0/A1 的通用修法本就是从它的实测缺陷中提炼的，天然覆盖。
-5. **下一阶段风险转移到消息组装能力差异**：同一 Chat 协议下，客户端可能以不同方式折叠 runtime context、历史、RAG 和工具链；先做 Capability，再决定是否需要客户端标签或特殊适配。
+5. **恢复适配后的风险仍是消息组装能力差异**：同一 Chat 协议下，客户端可能以不同方式折叠 runtime context、历史、RAG 和工具链；恢复时先验证现有 Capability，再决定是否需要客户端标签或特殊适配。
 
 排序与交付定义：
 
@@ -511,12 +513,12 @@ def build_envelope(payload):
 | --- | --- | --- |
 | P0 | A0、A1 | 已完成：Chat 当前轮注入、工具参数/工具结果、对齐失败处理 |
 | P1 | S1、S2 | 已完成约定验收：Chat 流式脱敏、跨 delta、10 万字符长流和安全边界增量扫描 |
-| P2 | A2/D2 | 下一步：Capability 识别、synthetic context、current/history/context 边界和客户端矩阵 |
+| P2 | A2/D2 | 合成范围已完成：Capability 识别、synthetic context 和客户端矩阵均已有证据；客户端专项适配暂停（SUSPENDED） |
 | P3 | A3、A4 | 工具结果注入按策略阻断；改写后未命中字符逐字节不变 |
 | P4 | S3 | 残余风险与路由前置条件写进文档，不再依赖隐性假设 |
 | R1 | R1 | 仅在确有 Anthropic 客户端时启用，按第 13 章矩阵回归 |
 
-**本期 Chat 协议的 P0 + P1 已完成。** 下一阶段只扩大 `/v1/chat/completions` 的客户端覆盖，不开放 Responses；验收必须继续从 Chat-only 入口进入。
+**本期 Chat 协议的 P0 + P1 已完成，Capability 合成范围也已实现。** 当前暂停扩大 `/v1/chat/completions` 的客户端覆盖，不开放 Responses；待实际投产准备时再针对具体客户端恢复验收，且必须继续从 Chat-only 入口进入。
 
 ### 12.2 阶段定义
 
@@ -544,9 +546,9 @@ def build_envelope(payload):
 | D5 输出和工具边界 | S1–S3 |
 | D6 L2/L3 融合 | 本文范围外 |
 
-### 12.3 下一步：Chat 多客户端闭环
+### 12.3 恢复后工作（当前暂停）：Chat 多客户端闭环
 
-本期 Chat 协议 P0/P1 已完成；下一阶段不是新增协议，也不是为每个客户端复制完整 Profile，而是让多个客户端在同一个 `/v1/chat/completions` 下映射到正确的语义 Capability：
+本期 Chat 协议 P0/P1 和 Capability 合成范围已完成；客户端专项适配当前暂停。恢复后不是新增协议，也不是为每个客户端复制完整 Profile，而是验证多个客户端在同一个 `/v1/chat/completions` 下映射到正确的语义 Capability：
 
 1. 完成 M0.1 夹具可识别性审计；无法区分的客户端场景必须标记为 Generic fallback，不伪造识别信号。
 2. 建立 Capability Registry/Resolver：优先使用请求结构和可验证 metadata，不能识别时进入 Generic/strict，不靠客户端名称猜测。
@@ -556,7 +558,7 @@ def build_envelope(payload):
 
 ## 13. 回归夹具
 
-`tools/protocol_matrix.py` 已实现协议诊断矩阵，断言**判决与钩子返回的上游可见内容**；Chat 列已完成 P0/P1 验收，下一阶段在其上增加 Capability/语义矩阵，Responses 列仍是后续适配基线：
+`tools/protocol_matrix.py` 已实现协议诊断矩阵，断言**判决与钩子返回的上游可见内容**；Chat 列已完成 P0/P1 验收，Capability/语义矩阵已实现合成范围。客户端专项适配和 Responses 适配当前暂停，Responses 列仅保留为恢复后的适配基线：
 
 | 场景 | OpenAI Chat + Capability（当前阶段） | OpenAI Responses（后续适配） | Anthropic（预留） |
 | --- | --- | --- | --- |
@@ -570,7 +572,7 @@ def build_envelope(payload):
 | 流式输出密钥（`incremental_diff`） | **已验证不泄漏** | 不承诺 | 不承诺 |
 | 超长流式输出（>5 万字符） | **已验证不断流** | 不承诺 | 不承诺 |
 
-> v0.6：Chat Protocol 的 P0/P1 已完成；当前阶段新增 Capability/语义矩阵。普通 Chat 客户端默认复用 Generic，只有新的消息语义才增加 Adapter。Responses 仍是后续目标；纯工具项无普通文本时当前 LiteLLM 可跳过 guard。Anthropic 预留，Gemini 不接入。
+> v0.6：Chat Protocol 的 P0/P1 已完成，Capability/语义矩阵已完成合成范围。**客户端专项适配与 Responses 适配暂停（SUSPENDED）**；待实际投产准备时针对具体客户端恢复测试和微调。现有 Responses 设计保留作预研，纯工具项无普通文本时当前 LiteLLM 仍可跳过 guard。Anthropic 预留，Gemini 不接入。
 
 ## 14. 决策、开放问题与验收标准
 

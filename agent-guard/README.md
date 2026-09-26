@@ -6,7 +6,7 @@
 
 本期安全验收仅针对客户端 `/v1/chat/completions`。`/v1/responses` 尚未完成适配验收；即使 guard 能处理其中部分字段，也不能承诺该路由已受保护。请用 `liteLLM/serve_chat_only.py` 启动项目提供的精确路由白名单入口，不要直接对外暴露 LiteLLM 本体；仅 `config.yaml` 不提供路由隔离。
 
-P0/P1 已解决 Chat 通用链路的基础问题。当前 Generic Chat Resolver、Capability 驱动 Envelope、`folded_runtime_context` 和 `tool_chain` 已实现，16 个合成夹具通过真实 Chat-only 网关矩阵。**这不是 DSH、OpenCode、Claude Code 等真实客户端版本的认证**；下一步是取证与逐客户端回归。阶段状态见 [`../docs/chat-multi-client-stage-acceptance.md`](../docs/chat-multi-client-stage-acceptance.md)。
+P0/P1 已解决 Chat 通用链路的基础问题。当前 Generic Chat Resolver、Capability 驱动 Envelope、`folded_runtime_context` 和 `tool_chain` 已实现，16 个合成夹具通过真实 Chat-only 网关矩阵。**这不是 DSH、OpenCode、Claude Code 等真实客户端版本的认证。客户端专项适配与 `/v1/responses` 适配当前暂停（SUSPENDED）**，待实际投产准备时再针对具体客户端测试和微调。阶段状态见 [`../docs/chat-multi-client-stage-acceptance.md`](../docs/chat-multi-client-stage-acceptance.md)。
 
 ## 当前能力
 
@@ -119,9 +119,9 @@ curl http://127.0.0.1:8001/v1/guard/check \
 | `AGENT_GUARD_MAX_OUTPUT_TEXT_CHARS` | `1000000` | 输出侧单项累积扫描上限，超过时返回策略拦截而非 413 |
 | `AGENT_GUARD_MAX_OUTPUT_TOTAL_CHARS` | `2000000` | 输出侧总上限 |
 
-## 下一阶段：真实 Chat 客户端认证
+## 后续阶段（暂停）：真实 Chat 客户端认证
 
-M0.1–M6 的能力模型和合成夹具链路已落地；下一步是确认目标客户端的实际版本与路由，取得脱敏真实请求，并通过同一个 `/v1/chat/completions` Chat-only 入口回归。每个纳入支持清单的客户端至少需要以下断言：
+M0.1–M6 的能力模型和合成夹具链路已落地，但客户端专项适配当前暂停。待后续实际投产准备时，再确认届时目标客户端的实际版本与路由，取得脱敏真实请求，并通过同一个 `/v1/chat/completions` Chat-only 入口回归。每个纳入支持清单的客户端至少需要以下断言：
 
 - 当前轮提示注入一定 `BLOCKED`；
 - 历史攻击不会反复阻断正常新输入；

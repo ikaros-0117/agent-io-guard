@@ -5,8 +5,10 @@
 | 日期 | 2026-09-26 |
 | 分支 | `codex/m1-capability-domain-model` |
 | 验收范围 | M0/M0.1–M6 的代码交付及**合成夹具**回放 |
-| 当前判定 | 阶段代码与合成夹具验收通过；**真实客户端认证和完整多客户端闭环未完成** |
+| 当前判定 | 阶段代码与合成夹具验收通过；**客户端专项适配和 `/v1/responses` 适配暂停（SUSPENDED）**，真实客户端认证待投产前恢复 |
 | 实施规范 | [`chat-multi-client-adaptation-implementation.md`](chat-multi-client-adaptation-implementation.md) |
+
+> **暂停决策（2026-09-26）**：客户端专项适配与 `/v1/responses` 适配暂时 suspend。当前不继续扩展客户端 Profile、Capability 或 Responses 协议；已有实现、合成夹具和验证脚本保留作回归与预研。后续进入实际投产准备时，再针对届时确定的具体客户端、版本、实际路由和脱敏请求样本逐项测试与微调。
 
 ## 1. 阶段与证据
 
@@ -80,7 +82,9 @@ liteLLM/.venv/bin/python tools/verify_stream_guard_inprocess.py
 - 改写层：span 精确原文坐标回写（A4）尚未完成；归一化脱敏可能改变未命中字符。
 - 协议层：`/v1/responses` 继续由 Chat-only 入口隔离，其纯工具项绕过缺口尚未修复；Anthropic/Gemini 未验收。
 
-## 5. 后续验收顺序
+## 5. 后续验收顺序（当前暂停）
+
+本节顺序不在当前阶段执行。只有进入实际投产准备、且具体客户端/版本/路由已确定后，才恢复并逐项执行；恢复前继续维持 Chat-only 路由隔离，`/v1/responses` 不开放。
 
 1. **真实 Chat 客户端取证**：按客户端及版本记录实际路由、真实请求和 LiteLLM→guard 投影；只保留脱敏后的结构证据。先验证 DSH，再按实际用量验证 OpenCode、Claude Code 和配置为 Chat 的 Codex；不走 Chat 的客户端不计入本阶段。
 2. **能力复用判定**：真实请求若等价于 Generic 或已有 Capability，只增加夹具/回归，不增加客户端代码；若出现可验证的新语义，才新增最小 Capability Adapter。
