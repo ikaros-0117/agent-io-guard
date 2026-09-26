@@ -1,6 +1,6 @@
 """Versioned adapters that explain Chat message semantics."""
 
-from .base import CapabilityAdapter, CapabilityRegistry
+from .base import CapabilityAdapter, CapabilityMatcher, CapabilityRegistry
 from .models import (
     Authority,
     CapabilityMatch,
@@ -15,6 +15,7 @@ __all__ = [
     "Authority",
     "CapabilityAdapter",
     "CapabilityMatch",
+    "CapabilityMatcher",
     "CapabilityRegistry",
     "CapabilitySet",
     "MatchConfidence",

@@ -111,6 +111,11 @@ class CapabilitySet:
     def has(self, capability_id: str) -> bool:
         return any(match.capability_id == capability_id for match in self.matches)
 
+    @property
+    def allows_history_exemption(self) -> bool:
+        """Only stable, non-fallback resolutions may neutralize historical hits."""
+        return not self.fallback and self.confidence != "low"
+
     def to_dict(self) -> dict[str, Any]:
         return {
             "adapter_id": self.adapter_id,

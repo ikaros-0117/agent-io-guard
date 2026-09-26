@@ -69,6 +69,7 @@ def test_capability_set_has_stable_capability_ids_and_round_trips() -> None:
     assert capability_set.has("folded_runtime_context") is True
     assert capability_set.has("tool_chain") is False
     assert capability_set.capability_ids == ("folded_runtime_context",)
+    assert capability_set.allows_history_exemption is True
     assert CapabilitySet.from_dict(capability_set.to_dict()) == capability_set
     json.dumps(capability_set.to_dict(), ensure_ascii=False)
 

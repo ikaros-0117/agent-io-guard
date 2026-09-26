@@ -16,6 +16,11 @@ class CapabilityAdapter(Protocol):
     def match(self, payload: LiteLLMGuardrailRequest) -> CapabilityMatch | None: ...
 
 
+@runtime_checkable
+class CapabilityMatcher(Protocol):
+    def match_all(self, payload: LiteLLMGuardrailRequest) -> tuple[CapabilityMatch, ...]: ...
+
+
 class CapabilityRegistry:
     """Register adapters and collect their matches without resolving policy."""
 
