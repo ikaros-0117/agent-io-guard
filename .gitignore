@@ -22,3 +22,6 @@ __pycache__/
 .env
 .env.*
 !.env.example
+
+# Download cache for the curated input evaluation set
+datas/.raw/

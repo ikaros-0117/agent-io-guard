@@ -1,0 +1,121 @@
+{
+  "name": "agent_input_zh_v1",
+  "built_at_date": "2026-11-02",
+  "selection": "193 curated core rows plus deterministic, rule-screened extension; publisher labels retained",
+  "counts": {
+    "total": 685,
+    "by_track": {
+      "content_safety": 188,
+      "broad_harmful_input": 80,
+      "external_content_safety": 270,
+      "pii_span": 105,
+      "behavior_challenge": 12,
+      "indirect_prompt_injection": 30
+    },
+    "by_language": {
+      "zh-Hans": 511,
+      "en": 34,
+      "zh-Hant": 140
+    },
+    "by_cohort": {
+      "curated_core": 193,
+      "screened_extension": 492
+    },
+    "by_source": {
+      "cswbyu/CHILLGuardTest": 48,
+      "CTCT-CT2/ChangeMore-prompt-injection-eval": 80,
+      "Raymond102103028/PATCH": 140,
+      "zjunlp/ChineseHarm-bench": 270,
+      "wan9yu/pii-bench-zh": 100,
+      "ai4privacy/pii-masking-openpii-1.5m": 5,
+      "thu-coai/Safety-Prompts": 6,
+      "AI45Lab/Flames": 6,
+      "Binye234/InjectAgent-CN": 30
+    },
+    "by_label": {
+      "0": 208,
+      "1": 465,
+      "null": 12
+    }
+  },
+  "records_sha256": "cc863b76d416828ab02fc2c8dff7579823a327735b553289511fca294ae4c4fc",
+  "sources": {
+    "chill": {
+      "name": "cswbyu/CHILLGuardTest",
+      "revision": "b3a46de5b357b4fde62504a814628c8a87ac087d",
+      "license": "cc-by-nc-4.0",
+      "url": "https://huggingface.co/datasets/cswbyu/CHILLGuardTest/resolve/b3a46de5b357b4fde62504a814628c8a87ac087d/CHILLGuardTest.json",
+      "raw_sha256": "b4437251518372435d59b0d871acd4952b5a7afd7d695362d2ffba2031b7b136"
+    },
+    "change": {
+      "name": "CTCT-CT2/ChangeMore-prompt-injection-eval",
+      "revision": "95ca3ad1a7128b5c1b28869aa342de2aea8e9049",
+      "license": "cc-by-nc-sa",
+      "url": "https://huggingface.co/datasets/CTCT-CT2/ChangeMore-prompt-injection-eval/resolve/95ca3ad1a7128b5c1b28869aa342de2aea8e9049/test.json",
+      "raw_sha256": "2224b1ef52144248fbc94419d02d5c05693fa1d57864f064ab824c7dd2b70d9e"
+    },
+    "patch_safe": {
+      "name": "Raymond102103028/PATCH",
+      "revision": "a561b8ed3f192d5f3d4320d68419aa5292316fb5",
+      "license": "mit; card says research use only",
+      "url": "https://huggingface.co/datasets/Raymond102103028/PATCH/resolve/a561b8ed3f192d5f3d4320d68419aa5292316fb5/safe/PATCH_safe_test.csv",
+      "raw_sha256": "5b4653781a205b20e242524171d854df760f7efd73bf2504c96da354277aa8b2"
+    },
+    "patch_gpt": {
+      "name": "Raymond102103028/PATCH",
+      "revision": "a561b8ed3f192d5f3d4320d68419aa5292316fb5",
+      "license": "mit; card says research use only",
+      "url": "https://huggingface.co/datasets/Raymond102103028/PATCH/resolve/a561b8ed3f192d5f3d4320d68419aa5292316fb5/unsafe_gpt/PATCH_unsafe_gpt_test.csv",
+      "raw_sha256": "6810a18113e1c9bb6e165480ef928096fe3c36ef5e5ede7639722d53fa751fa0"
+    },
+    "harm": {
+      "name": "zjunlp/ChineseHarm-bench",
+      "revision": "d8ac7d045506b9b682e8ba6398ebe357aeb357d0",
+      "license": "cc-by-nc-4.0",
+      "url": "https://huggingface.co/datasets/zjunlp/ChineseHarm-bench/resolve/d8ac7d045506b9b682e8ba6398ebe357aeb357d0/bench.json",
+      "raw_sha256": "f67d77a6947f46e85401dadfdbc6f696b8cbec77b5ecec0b062d6b4273f8f93f"
+    },
+    "pii_formal": {
+      "name": "wan9yu/pii-bench-zh",
+      "revision": "c350b94897af668517ff5de237d89f2ce2eaa6f0",
+      "license": "apache-2.0",
+      "url": "https://huggingface.co/datasets/wan9yu/pii-bench-zh/resolve/c350b94897af668517ff5de237d89f2ce2eaa6f0/data/pii_bench_zh.jsonl",
+      "raw_sha256": "bcaa54909fd69c6737b8e442c4d740ce1bf5b95b7d4af70b2f2692010e1ff7a5"
+    },
+    "pii_chat": {
+      "name": "wan9yu/pii-bench-zh",
+      "revision": "c350b94897af668517ff5de237d89f2ce2eaa6f0",
+      "license": "apache-2.0",
+      "url": "https://huggingface.co/datasets/wan9yu/pii-bench-zh/resolve/c350b94897af668517ff5de237d89f2ce2eaa6f0/data/pii_bench_zh_chat.jsonl",
+      "raw_sha256": "4ddacd78dfac49b723032de5e1c29c432a44049245e03a8ea960c86bbf3b765c"
+    },
+    "openpii": {
+      "name": "ai4privacy/pii-masking-openpii-1.5m",
+      "revision": "a785eb528e28be2693c3718a27e066970de5dadb",
+      "license": "cc-by-4.0",
+      "url": "https://datasets-server.huggingface.co/first-rows?dataset=ai4privacy%2Fpii-masking-openpii-1.5m&config=default&split=validation",
+      "raw_sha256": "654fad6ce90ef27f26e23d0555e74e0ace7cdb6b7247ec8ad3a428ccd83ea280"
+    },
+    "safety": {
+      "name": "thu-coai/Safety-Prompts",
+      "revision": "bbfd3ce47a32b998e4b94225a375b41e44070ae5",
+      "license": "apache-2.0",
+      "url": "https://raw.githubusercontent.com/thu-coai/Safety-Prompts/bbfd3ce47a32b998e4b94225a375b41e44070ae5/instruction_attack_scenarios.json",
+      "raw_sha256": "bea01b9d2b277f2a3ca212d9c34e1c0f3ca497da536eb64b32b60b737594bb91"
+    },
+    "flames": {
+      "name": "AI45Lab/Flames",
+      "revision": "234bcb7a4a9da44c4177d2c2005e3bf8a582a5fc",
+      "license": "apache-2.0",
+      "url": "https://raw.githubusercontent.com/AI45Lab/Flames/234bcb7a4a9da44c4177d2c2005e3bf8a582a5fc/Flames_1k_Chinese.jsonl",
+      "raw_sha256": "f53400dcbb8795fb262993bda0615afdc77de1c4685e7c94d2df2a3cd47613fa"
+    },
+    "inject": {
+      "name": "Binye234/InjectAgent-CN",
+      "revision": "3ea919aabbccef58152117782c7174cced95244c",
+      "license": "mit",
+      "url": "https://raw.githubusercontent.com/Binye234/InjectAgent-CN/3ea919aabbccef58152117782c7174cced95244c/src/scenarios.py",
+      "raw_sha256": "2fe0a71bc2d338f688dcb1f7eb73f10eaabece0c5e6ce8dd23db4300893f542b"
+    }
+  }
+}
